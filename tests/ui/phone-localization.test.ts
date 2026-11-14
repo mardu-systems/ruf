@@ -163,17 +163,85 @@ test.each([
 test("getting started renders the browser explanation in both languages", () => {
   const props = {
     runtime: "browser" as const,
-    registration: "unregistered" as const,
+    registration: "unconfigured" as const,
     audioUnknown: false,
+    onretry() {},
     onsetup() {},
     onexplore() {},
   };
   locale.set("de");
-  expect(render(GettingStarted, { props }).body).toContain(
-    "Lerne dein Telefon kennen",
-  );
+  expect(render(GettingStarted, { props }).body).toContain("Browser-Vorschau");
   locale.set("en");
-  expect(render(GettingStarted, { props }).body).toContain(
-    "Get to know your phone",
-  );
+  expect(render(GettingStarted, { props }).body).toContain("Browser preview");
+});
+
+test("getting started distinguishes disabled accounts from missing configuration", () => {
+  locale.set("de");
+  const body = render(GettingStarted, {
+    props: {
+      runtime: "desktop",
+      registration: "unconfigured",
+      hasAccount: true,
+      accountEnabled: false,
+      audioUnknown: false,
+      onsetup() {},
+      onexplore() {},
+      onretry() {},
+    },
+  }).body;
+  expect(body).toContain("Dein SIP-Konto ist deaktiviert");
+  expect(body).toContain("Kontoeinstellungen öffnen");
+  expect(body).not.toContain("speichere sie");
+});
+
+test("unavailable runtime offers reload without claiming a stale account is ready", () => {
+  locale.set("en");
+  const body = render(GettingStarted, {
+    props: {
+      runtime: "unavailable",
+      registration: "registered",
+      hasAccount: true,
+      audioUnknown: false,
+      onsetup() {},
+      onexplore() {},
+      onretry() {},
+    },
+  }).body;
+  expect(body).toContain("Reload status");
+  expect(body).not.toContain("For an international number");
+  expect(body).not.toContain("Open account settings");
+});
+
+test("help during a call returns to the call instead of offering a new number", () => {
+  locale.set("de");
+  const body = render(GettingStarted, {
+    props: {
+      runtime: "desktop",
+      registration: "registered",
+      hasAccount: true,
+      callInProgress: true,
+      audioUnknown: false,
+      onsetup() {},
+      onexplore() {},
+      onretry() {},
+    },
+  }).body;
+  expect(body).toContain("Zum Gespräch");
+  expect(body).not.toContain("Nummer wählen");
+});
+
+test("loading status does not offer to configure an account", () => {
+  locale.set("en");
+  const body = render(GettingStarted, {
+    props: {
+      runtime: "loading",
+      registration: "unconfigured",
+      audioUnknown: false,
+      onsetup() {},
+      onexplore() {},
+      onretry() {},
+    },
+  }).body;
+  expect(body).toContain("Loading phone status");
+  expect(body).not.toContain("Set up SIP account");
 });

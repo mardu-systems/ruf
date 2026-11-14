@@ -50,7 +50,6 @@
   <div class="setting-row">
     <div class="setting-description">
       <label for="favorites-first">{$t("settings.favorites_first")}</label>
-      <p>{$t("settings.favorites_first_help")}</p>
     </div>
     <input
       id="favorites-first"
@@ -61,7 +60,6 @@
   <div class="setting-row">
     <div class="setting-description">
       <label for="show-organization">{$t("settings.show_company")}</label>
-      <p>{$t("settings.show_company_help")}</p>
     </div>
     <input
       id="show-organization"
@@ -132,7 +130,7 @@
     </div>{/if}
   <div class="settings-form-actions settings-save-bar">
     <p>
-      {dirty ? $t("settings.unsaved_notice") : $t("settings.data_local")}
+      {dirty ? $t("settings.unsaved_notice") : ""}
     </p>
     <div class="settings-actions">
       <button

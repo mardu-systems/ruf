@@ -40,13 +40,13 @@
     {
       key: "inputDevice",
       label: message("settings.microphone"),
-      description: message("settings.microphone_device_help"),
+      description: null,
       direction: "inputs",
     },
     {
       key: "outputDevice",
       label: message("settings.speaker"),
-      description: message("settings.speaker_device_help"),
+      description: null,
       direction: "outputs",
     },
     {
@@ -86,13 +86,20 @@
     <div class="setting-row">
       <div class="setting-description">
         <label for={row.key}>{$text(row.label)}</label>
-        <p id={`${row.key}-help`}>{$text(row.description)}</p>
+        {#if row.description}<p id={`${row.key}-help`}>
+            {$text(row.description)}
+          </p>{/if}
       </div>
       <div class="setting-control">
         <select
           id={row.key}
           bind:value={value[row.key]}
-          aria-describedby={`${row.key}-help${missing && devices ? ` ${row.key}-missing` : ""}`}
+          aria-describedby={[
+            row.description ? `${row.key}-help` : "",
+            missing && devices ? `${row.key}-missing` : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined}
           disabled={disabled || busy || devicesLoading}
           ><option value="">{$t("settings.system_default")}</option
           >{#each available as device}<option
@@ -151,7 +158,6 @@
   <div class="setting-row">
     <div class="setting-description">
       <label for="ringtone-style">{$t("settings.ringtone")}</label>
-      <p>{$t("settings.ringtone_help")}</p>
     </div>
     <select id="ringtone-style" bind:value={value.ringtone}
       ><option value="classic">{$t("settings.ringtone_classic")}</option><option
@@ -198,9 +204,7 @@
   </div>
   <div class="settings-form-actions settings-save-bar">
     <p>
-      {dirty
-        ? $t("settings.unsaved_notice")
-        : $t("settings.all_accounts_scope")}
+      {dirty ? $t("settings.unsaved_notice") : ""}
     </p>
     <div class="settings-actions">
       <button

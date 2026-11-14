@@ -867,77 +867,6 @@
           editedControl = target;
       }}
     >
-      {#if browser || info?.telephony === "notLinked"}<p
-          class="settings-feedback"
-        >
-          {browser
-            ? $t("settings.browser_preview")
-            : $t("settings.native_required")}
-        </p>{/if}
-      {#if loading}<p class="settings-feedback" role="status">
-          {$t("settings.loading")}
-        </p>{/if}
-      {#if error}<div
-          bind:this={errorNotice}
-          class="settings-feedback error"
-          role="alert"
-        >
-          <p>
-            {$text(error)}{#if error === audioError}
-              {$t("settings.audio_error_help")}{/if}
-          </p>
-          <button
-            class="text-button"
-            type="button"
-            disabled={busy || loading}
-            onclick={() => {
-              void refresh();
-              void loadPreferences();
-            }}>{$t("settings.reload_status")}</button
-          >
-        </div>{/if}
-      {#if preferencesError && ["general", "notifications", "contacts"].includes(activeSection)}
-        <div class="settings-feedback error" role="alert">
-          <p>{$text(preferencesError)}</p>
-          <button
-            type="button"
-            class="text-button"
-            disabled={preferencesLoading}
-            onclick={() => void loadPreferences()}
-            >{$t("settings.reload_settings")}</button
-          >
-        </div>
-      {/if}
-      {#if !callIdle && (section === "accounts" || section === "audio")}<p
-          class="settings-feedback"
-          role="status"
-        >
-          {$t("settings.call_active")}
-        </p>{/if}
-      {#if pendingNavigation}<div
-          bind:this={discardNotice}
-          class="settings-feedback discard-note"
-          role="group"
-          aria-label={$t("settings.unsaved_changes")}
-        >
-          <p>{$t("settings.unsaved_notice")}</p>
-          <div>
-            <button
-              class="secondary-button"
-              type="button"
-              bind:this={keepEditing}
-              onclick={continueEditing}>{$t("settings.keep_editing")}</button
-            ><button
-              class="secondary-button"
-              type="button"
-              disabled={busy}
-              onclick={discardChanges}>{$t("settings.discard_changes")}</button
-            >
-          </div>
-        </div>{/if}
-      {#if feedback && !dirty}<p class="settings-feedback" role="status">
-          {$text(feedback)}
-        </p>{/if}
       {#if activeSection === "general"}
         <GeneralSettings
           bind:autostart={autostartEnabled}
@@ -1010,78 +939,45 @@
         <div class="settings-title">
           <div>
             <h1>{$t("settings.sip_accounts")}</h1>
-            <p>{$t("settings.accounts_description")}</p>
           </div>
         </div>
-        {#if accounts.length}<section
-            class="account-overview"
-            aria-labelledby="accounts-overview-heading"
-          >
-            <h2 class="settings-group" id="accounts-overview-heading">
-              {$t("settings.saved_accounts")}
-            </h2>
-            {#each accounts as item}<div
-                class="setting-row"
-                role="group"
-                aria-labelledby={`overview-account-${item.id}`}
-              >
-                <div class="setting-description">
-                  <h3 id={`overview-account-${item.id}`}>{item.name}</h3>
-                  <p>
-                    {item.enabled === false
-                      ? $t("settings.disabled")
-                      : item.registration === "registered"
-                        ? $t("settings.registration_confirmed")
-                        : item.registration === "registering"
-                          ? $t("settings.registering")
-                          : $t(
-                              "settings.not_registered",
-                            )}{snapshot?.selectedAccountId === item.id
-                      ? $t("settings.outgoing_default_suffix")
-                      : ""}
-                  </p>
-                  {#if item.registeredAtMs}<p>
-                      {$t("settings.last_confirmed")}
-                      {new Date(item.registeredAtMs).toLocaleString($locale)}
-                    </p>{/if}
-                </div>
-                <div class="settings-actions">
-                  <button
-                    type="button"
-                    class="text-button"
-                    disabled={busy ||
-                      accountDirty ||
-                      !callIdle ||
-                      item.removing ||
-                      snapshot?.selectedAccountId === item.id}
-                    aria-label={$t("settings.make_default_named", {
-                      name: item.name,
-                    })}
-                    onclick={() => void chooseAccount(item.id)}
-                    >{$t("settings.make_default")}</button
-                  ><button
-                    type="button"
-                    class="secondary-button"
-                    disabled={busy ||
-                      accountDirty ||
-                      !callIdle ||
-                      item.removing ||
-                      item.enabledChanging}
-                    aria-label={$t(
-                      item.enabled === false
-                        ? "settings.enable_named"
-                        : "settings.disable_named",
-                      { name: item.name },
-                    )}
-                    onclick={() =>
-                      void toggleAccount(item.id, item.enabled === false)}
-                    >{item.enabled === false
-                      ? $t("settings.enable")
-                      : $t("settings.disable")}</button
-                  >
-                </div>
-              </div>{/each}
-          </section>{/if}
+        {#if existing}
+          <div class="settings-actions">
+            <button
+              type="button"
+              class="text-button"
+              disabled={busy ||
+                accountDirty ||
+                !callIdle ||
+                existing.removing ||
+                snapshot?.selectedAccountId === existing.id}
+              aria-label={$t("settings.make_default_named", {
+                name: existing.name,
+              })}
+              onclick={() => void chooseAccount(existing.id)}
+              >{$t("settings.make_default")}</button
+            ><button
+              type="button"
+              class="secondary-button"
+              disabled={busy ||
+                accountDirty ||
+                !callIdle ||
+                existing.removing ||
+                existing.enabledChanging}
+              aria-label={$t(
+                existing.enabled === false
+                  ? "settings.enable_named"
+                  : "settings.disable_named",
+                { name: existing.name },
+              )}
+              onclick={() =>
+                void toggleAccount(existing.id, existing.enabled === false)}
+              >{existing.enabled === false
+                ? $t("settings.enable")
+                : $t("settings.disable")}</button
+            >
+          </div>
+        {/if}
         {#if removedDraft}<div class="settings-feedback error" role="alert">
             <p>
               {$t("settings.removed_draft")}
@@ -1109,9 +1005,6 @@
               void remove();
             }}
           />{/key}
-        <p class="settings-footnote">
-          {$t("settings.accounts_help")}
-        </p>
       {:else if activeSection === "audio"}
         <SoundPanel
           bind:value={sound}
@@ -1152,5 +1045,90 @@
         <AboutPanel {info} />
       {/if}
     </div>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (The scrollable status area needs keyboard access to long messages.) -->
+    <section
+      class="settings-notices"
+      tabindex={error ||
+      loading ||
+      feedback ||
+      preferencesError ||
+      pendingNavigation ||
+      !callIdle
+        ? 0
+        : undefined}
+      aria-label={$t("settings.status_messages")}
+    >
+      {#if browser || info?.telephony === "notLinked"}<p
+          class="settings-feedback"
+        >
+          {browser
+            ? $t("settings.browser_preview")
+            : $t("settings.native_required")}
+        </p>{/if}
+      {#if loading}<p class="settings-feedback" role="status">
+          {$t("settings.loading")}
+        </p>{/if}
+      {#if error}<div
+          bind:this={errorNotice}
+          class="settings-feedback error"
+          role="alert"
+        >
+          <p>
+            {$text(error)}{#if error === audioError}
+              {$t("settings.audio_error_help")}{/if}
+          </p>
+          <button
+            class="text-button"
+            type="button"
+            disabled={busy || loading}
+            onclick={() => {
+              void refresh();
+              void loadPreferences();
+            }}>{$t("settings.reload_status")}</button
+          >
+        </div>{/if}
+      {#if preferencesError && ["general", "notifications", "contacts"].includes(activeSection)}
+        <div class="settings-feedback error" role="alert">
+          <p>{$text(preferencesError)}</p>
+          <button
+            type="button"
+            class="text-button"
+            disabled={preferencesLoading}
+            onclick={() => void loadPreferences()}
+            >{$t("settings.reload_settings")}</button
+          >
+        </div>
+      {/if}
+      {#if !callIdle && (section === "accounts" || section === "audio")}<p
+          class="settings-feedback"
+          role="status"
+        >
+          {$t("settings.call_active")}
+        </p>{/if}
+      {#if pendingNavigation}<div
+          bind:this={discardNotice}
+          class="settings-feedback discard-note"
+          role="group"
+          aria-label={$t("settings.unsaved_changes")}
+        >
+          <p>{$t("settings.unsaved_notice")}</p>
+          <div>
+            <button
+              class="secondary-button"
+              type="button"
+              bind:this={keepEditing}
+              onclick={continueEditing}>{$t("settings.keep_editing")}</button
+            ><button
+              class="secondary-button"
+              type="button"
+              disabled={busy}
+              onclick={discardChanges}>{$t("settings.discard_changes")}</button
+            >
+          </div>
+        </div>{/if}
+      {#if feedback && !dirty}<p class="settings-feedback" role="status">
+          {$text(feedback)}
+        </p>{/if}
+    </section>
   </main>
 </div>

@@ -29,6 +29,12 @@ selected account remains selected even when disabled; dialing then returns
 Editing/saving a disabled account preserves its disabled state. Removal remains
 a separate, explicitly destructive operation.
 
+Settings show activation and outgoing-default actions for the account selected
+in the existing sidebar. Select another account there before managing it; an
+unsaved draft still uses the existing continue/discard guard. The latest native
+registration timestamp is available under the account's advanced connection
+details, rather than repeated in a second overview of all accounts.
+
 `busy` rejects activation during an incoming, queued outgoing, answering or
 established/held call, or while a native update for that account is pending.
 The native queue repeats the idle guard; a call that wins the race rejects the update and

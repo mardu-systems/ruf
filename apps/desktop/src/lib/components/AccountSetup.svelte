@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t, text, message, type MessageValue } from "../i18n";
+  import { t, text, message, locale, type MessageValue } from "../i18n";
   import { tick } from "svelte";
   import type { AccountConfig, AccountSnapshot } from "../generated/AppInfo";
   import {
@@ -282,11 +282,13 @@
           </p>{/if}
       </div>
     </div>
-    <p class="settings-trust-note">
-      {$t("settings.certificate_help")}
-    </p>
     <details class="account-advanced">
       <summary>{$t("settings.advanced_connection")}</summary>
+      {#if existing?.registeredAtMs}<p class="settings-trust-note">
+          {$t("settings.last_confirmed")}
+          {new Date(existing.registeredAtMs).toLocaleString($locale)}
+        </p>{/if}
+      <p class="settings-trust-note">{$t("settings.certificate_help")}</p>
       <div class="setting-row">
         <div class="setting-description">
           <label for="auth-username">{$t("settings.auth_username")}</label>

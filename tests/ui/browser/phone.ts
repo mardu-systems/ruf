@@ -61,6 +61,15 @@ export default async function phoneRegressions(
       },
       ringtonePlaying: false,
     };
+    if (location.search.includes("first-run-empty")) {
+      state.accounts = [];
+      state.selectedAccountId = null;
+      state.registration = "unconfigured";
+    } else if (location.search.includes("first-run-disabled")) {
+      state.accounts[0]!.enabled = false;
+      state.accounts[0]!.registration = "unconfigured";
+      state.registration = "unconfigured";
+    }
     if (location.search.includes("restored-")) {
       Object.assign(state, {
         call: location.search.includes("restored-held") ? "held" : "active",
@@ -165,7 +174,12 @@ export default async function phoneRegressions(
             history: { recordingEnabled: true, retentionDays: null },
           };
         if (command === "get_app_info")
-          return { version: "0.1.0", telephony: "linked" };
+          return {
+            version: "0.1.0",
+            telephony: location.search.includes("first-run-unlinked")
+              ? "notLinked"
+              : "linked",
+          };
         if (command === "get_engine_snapshot") {
           state.revision++;
           if (fixture.holdSnapshot) {
@@ -235,7 +249,9 @@ export default async function phoneRegressions(
         throw new Error("Unexpected synthetic IPC: " + command);
       },
     };
-    localStorage.setItem("sip.introduction.v1", "seen");
+    if (location.search.includes("first-run"))
+      localStorage.removeItem("sip.introduction.v1");
+    else localStorage.setItem("sip.introduction.v1", "seen");
   });
   if (englishSmoke) return englishSmoke(page, "phone", origin);
   const results: FixtureResult[] = [];
@@ -437,6 +453,139 @@ export default async function phoneRegressions(
       );
     },
   );
+  await check(
+    "first run opens real account setup without requesting permissions",
+    async () => {
+      await page.setViewportSize({ width: 320, height: 440 });
+      await page.goto(`${origin}/?first-run-empty`);
+      await page
+        .getByRole("heading", { name: "Verbinde dein SIP-Konto", exact: true })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/onboarding-first-start.png",
+        });
+      await page
+        .getByRole("button", { name: "SIP-Konto einrichten", exact: true })
+        .click();
+      const commands = await page.evaluate(
+        () => window.__phoneFixture.commands,
+      );
+      if (
+        !commands.some(
+          (c) => c.command === "open_settings" && c.args.section === "accounts",
+        )
+      )
+        throw Error("Onboarding did not open account setup");
+      if (commands.some((c) => c.command.startsWith("request_")))
+        throw Error("Onboarding requested an unsolicited system permission");
+    },
+  );
+  await check(
+    "portable build help explains the limitation and opens diagnostics",
+    async () => {
+      await page.goto(`${origin}/?first-run-unlinked`);
+      await page
+        .getByRole("heading", {
+          name: "Telefonie nicht eingebunden",
+          exact: true,
+        })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/onboarding-portable.png",
+        });
+      await page
+        .getByRole("button", { name: "Diagnose öffnen", exact: true })
+        .click();
+      const commands = await page.evaluate(
+        () => window.__phoneFixture.commands,
+      );
+      if (
+        !commands.some(
+          (c) =>
+            c.command === "open_settings" && c.args.section === "diagnostics",
+        )
+      )
+        throw Error(
+          "Portable onboarding opened account setup instead of diagnostics",
+        );
+      if (commands.some((c) => c.command === "get_engine_snapshot"))
+        throw Error("Portable onboarding attempted native engine access");
+    },
+  );
+  await check(
+    "saved disabled accounts skip first-run onboarding and explain activation on demand",
+    async () => {
+      await page.goto(`${origin}/?first-run-disabled`);
+      await page
+        .getByRole("button", { name: "Anrufen", exact: true })
+        .waitFor();
+      await page.getByText("Konto deaktiviert", { exact: true }).waitFor();
+      if (await page.locator(".getting-started").count())
+        throw Error(
+          "A returning user with a saved account was sent through first-run setup",
+        );
+      await page
+        .getByRole("button", { name: "Starthilfe", exact: true })
+        .click();
+      await page
+        .getByRole("heading", {
+          name: "Dein SIP-Konto ist deaktiviert",
+          exact: true,
+        })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/onboarding-disabled-account.png",
+        });
+    },
+  );
+  await check(
+    "getting started retries an unavailable snapshot instead of offering setup",
+    async () => {
+      await fresh("?snapshot-error");
+      await page
+        .getByRole("button", { name: "Starthilfe", exact: true })
+        .click();
+      await page
+        .getByRole("heading", {
+          name: "Telefonstatus nicht verfügbar",
+          exact: true,
+        })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/onboarding-status-error.png",
+        });
+      await page.evaluate(() => (window.__phoneFixture.failSnapshot = false));
+      await page
+        .locator(".start-actions")
+        .getByRole("button", { name: "Status erneut laden", exact: true })
+        .click();
+      await page.getByText("Angemeldet", { exact: true }).waitFor();
+      if (
+        await page.evaluate(() =>
+          window.__phoneFixture.commands.some(
+            (c) => c.command === "open_settings",
+          ),
+        )
+      )
+        throw Error("Status retry opened account setup");
+    },
+  );
+  await check("call help returns to the active conversation", async () => {
+    await fresh();
+    await offerCall("active");
+    await page.getByRole("button", { name: "Starthilfe", exact: true }).click();
+    await page
+      .locator(".start-actions")
+      .getByRole("button", { name: "Zum Gespräch", exact: true })
+      .click();
+    if (await page.locator(".getting-started,.compact-call").count())
+      throw Error("Call help did not restore the full call view");
+    await page.getByRole("button", { name: "Auflegen", exact: true }).waitFor();
+  });
   for (const registration of ["failed", "registering", "unconfigured"] as const)
     await check(
       "onboarding explains " + registration + " saved account",

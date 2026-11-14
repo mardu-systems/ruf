@@ -1,7 +1,5 @@
 import { mount } from "svelte";
 import { isTauri } from "@tauri-apps/api/core";
-import App from "./App.svelte";
-import Settings from "./Settings.svelte";
 import "./app.css";
 import { initializeLocalization, locale } from "./lib/i18n";
 
@@ -16,4 +14,7 @@ await initializeLocalization();
 locale.subscribe((language) => {
   document.documentElement.lang = language;
 });
-mount(settingsWindow ? Settings : App, { target });
+const { default: WindowComponent } = settingsWindow
+  ? await import("./Settings.svelte")
+  : await import("./App.svelte");
+mount(WindowComponent, { target });

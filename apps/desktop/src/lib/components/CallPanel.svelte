@@ -360,6 +360,78 @@
     >
       {elapsed}
     </p>{/if}
+  <div class="call-controls">
+    <div class="call-actions">
+      {#if call.state === "incoming"}<button
+          class="primary-button"
+          disabled={busy || audioUnknown}
+          title={$t("phone.call.answer_shortcut", { shortcut: hint("answer") })}
+          onclick={() => onanswer(call.id)}
+          ><Icon name="phone" size={18} />{$t("phone.call.answer")}</button
+        >{/if}
+      {#if established(call)}
+        <button
+          class="secondary-button"
+          type="button"
+          disabled={busy || audioUnknown || mutePending}
+          aria-pressed={call.muted}
+          aria-busy={mutePending}
+          title={$t("phone.call.mute_shortcut", { shortcut: hint("mute") })}
+          onclick={toggleMute}
+          >{call.muted
+            ? $t("phone.call.unmute")
+            : $t("phone.call.mute")}</button
+        >
+        <button
+          class="secondary-button"
+          type="button"
+          disabled={!canChange}
+          aria-pressed={call.localHeld}
+          title={$t("phone.call.hold_shortcut", { shortcut: hint("hold") })}
+          onclick={() => onhold(call.id, !call.localHeld)}
+          >{call.localHeld
+            ? $t("phone.call.resume")
+            : $t("phone.call.hold")}</button
+        >
+        {#if calls.length === 1}<button
+            bind:this={transferButton}
+            class="secondary-button"
+            type="button"
+            disabled={!canChange}
+            aria-expanded={transferOpen}
+            title={$t("phone.call.transfer_shortcut", {
+              shortcut: hint("transfer"),
+            })}
+            onclick={openTransfer}>{$t("phone.call.transfer")}</button
+          >{/if}
+      {/if}
+      <button
+        class="danger-button"
+        disabled={busy}
+        title={$t("phone.call.end_shortcut", { shortcut: hint("end") })}
+        onclick={() => onhangup(call.id)}
+        ><Icon name="endCall" size={20} />{call.state === "incoming"
+          ? $t("phone.call.reject")
+          : $t("phone.call.hang_up")}</button
+      >
+    </div>
+    {#if established(call)}
+      <button
+        class="secondary-button tone-toggle"
+        type="button"
+        aria-expanded={tonesOpen}
+        title={$t("phone.call.tones_shortcut", { shortcut: hint("tones") })}
+        onclick={toggleTones}
+        ><Icon name="keypad" size={16} />{tonesOpen
+          ? $t("phone.call.hide_tones")
+          : $t("phone.call.show_tones")}</button
+      >
+    {/if}
+  </div>
+  {#if established(call) && tonesOpen}<DtmfPad
+      disabled={!canSendTone}
+      onsend={(digit) => onsenddtmf(call.id, digit)}
+    />{/if}
   <div class="call-status" role="status" aria-live="polite">
     {#if call.localHeld && calls.length === 1}<p>
         {$t("phone.call.local_held")}
@@ -398,74 +470,6 @@
   {#if testAudio}<p class="call-test-note">
       {$t("phone.call.test_audio")}
     </p>{/if}
-  <div class="call-actions">
-    {#if call.state === "incoming"}<button
-        class="primary-button"
-        disabled={busy || audioUnknown}
-        title={$t("phone.call.answer_shortcut", { shortcut: hint("answer") })}
-        onclick={() => onanswer(call.id)}
-        ><Icon name="phone" size={18} />{$t("phone.call.answer")}</button
-      >{/if}
-    {#if established(call)}
-      <button
-        class="secondary-button"
-        type="button"
-        disabled={busy || audioUnknown || mutePending}
-        aria-pressed={call.muted}
-        aria-busy={mutePending}
-        title={$t("phone.call.mute_shortcut", { shortcut: hint("mute") })}
-        onclick={toggleMute}
-        >{call.muted ? $t("phone.call.unmute") : $t("phone.call.mute")}</button
-      >
-      <button
-        class="secondary-button"
-        type="button"
-        disabled={!canChange}
-        aria-pressed={call.localHeld}
-        title={$t("phone.call.hold_shortcut", { shortcut: hint("hold") })}
-        onclick={() => onhold(call.id, !call.localHeld)}
-        >{call.localHeld
-          ? $t("phone.call.resume")
-          : $t("phone.call.hold")}</button
-      >
-      {#if calls.length === 1}<button
-          bind:this={transferButton}
-          class="secondary-button"
-          type="button"
-          disabled={!canChange}
-          aria-expanded={transferOpen}
-          title={$t("phone.call.transfer_shortcut", {
-            shortcut: hint("transfer"),
-          })}
-          onclick={openTransfer}>{$t("phone.call.transfer")}</button
-        >{/if}
-    {/if}
-    <button
-      class="danger-button"
-      disabled={busy}
-      title={$t("phone.call.end_shortcut", { shortcut: hint("end") })}
-      onclick={() => onhangup(call.id)}
-      ><Icon name="endCall" size={20} />{call.state === "incoming"
-        ? $t("phone.call.reject")
-        : $t("phone.call.hang_up")}</button
-    >
-  </div>
-  {#if established(call)}
-    <button
-      class="secondary-button tone-toggle"
-      type="button"
-      aria-expanded={tonesOpen}
-      title={$t("phone.call.tones_shortcut", { shortcut: hint("tones") })}
-      onclick={toggleTones}
-      ><Icon name="keypad" size={16} />{tonesOpen
-        ? $t("phone.call.hide_tones")
-        : $t("phone.call.show_tones")}</button
-    >
-    {#if tonesOpen}<DtmfPad
-        disabled={!canSendTone}
-        onsend={(digit) => onsenddtmf(call.id, digit)}
-      />{/if}
-  {/if}
   {#if child && calls.length === 2}
     <div class="consultation-actions">
       <button

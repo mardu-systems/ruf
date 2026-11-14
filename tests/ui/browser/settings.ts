@@ -807,15 +807,16 @@ export default async function settingsRegressions(
     },
   );
   await check(
-    "account overview actions identify each account and headings follow the section",
+    "selected account actions identify their account and headings follow the section",
     "",
     async () => {
       await page
         .getByRole("button", { name: "Deaktivieren · Büro", exact: true })
         .waitFor({ timeout: 1500 });
-      await page
-        .getByRole("group", { name: "Büro", exact: true })
-        .waitFor({ timeout: 1500 });
+      if (await page.locator(".account-overview").count())
+        throw Error(
+          "Selected account editor must not repeat the whole account list",
+        );
       await page
         .getByRole("heading", { name: "SIP-Konten", level: 1, exact: true })
         .waitFor({ timeout: 1500 });
@@ -852,10 +853,23 @@ export default async function settingsRegressions(
         throw Error(
           `Inner settings overflow: ${layout.scroll}/${layout.client}`,
         );
-      const row = page.locator(".account-overview .setting-row").first();
-      const name = await row.locator("h3").boundingBox(),
-        actions = await row.locator(".settings-actions").boundingBox();
-      if (!name || !actions || name.x + name.width > actions.x)
+      const name = await page
+        .getByRole("heading", { name: "W".repeat(64), level: 2, exact: true })
+        .boundingBox();
+      const actions = await page
+        .getByRole("button", {
+          name: `Deaktivieren · ${"W".repeat(64)}`,
+          exact: true,
+        })
+        .boundingBox();
+      if (
+        !name ||
+        !actions ||
+        (name.x < actions.x + actions.width &&
+          name.x + name.width > actions.x &&
+          name.y < actions.y + actions.height &&
+          name.y + name.height > actions.y)
+      )
         throw Error("Account name overlaps actions");
       await page.setViewportSize({ width: 900, height: 660 });
     },

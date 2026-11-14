@@ -24,6 +24,8 @@ import {
   englishExpectedLabels,
 } from "../tests/ui/browser/english-smoke.ts";
 import localization from "../tests/ui/browser/localization.ts";
+import stability from "../tests/ui/browser/stability.ts";
+import { installAppStoreFixtures } from "../tests/ui/browser/app-store-fixtures.ts";
 
 const root = resolve(import.meta.dir, "..");
 const expectedEnglishLabels = englishExpectedLabels();
@@ -161,12 +163,13 @@ try {
       ["dialer-identity", dialerIdentity],
       ["settings", settings],
       ["layout", layout],
+      ["stability", stability],
     ] as const) {
       if (process.env.SIP_UI_FLOW && process.env.SIP_UI_FLOW !== name) continue;
       const path = join(temporary, `${language}-${name}.js`);
       await Bun.write(
         path,
-        `async (page) => { const englishScenario = ${language === "en" ? `async (target, flow, origin) => (${englishSmoke.toString()})(target, flow, origin, ${JSON.stringify(expectedEnglishLabels)})` : "undefined"}; const result = await (${test.toString()})(page, new URL(page.url()).origin, ${process.env.SIP_UI_CAPTURE === "1"}, englishScenario); if (result && result.passed === false) throw new Error(JSON.stringify(result)); return result ?? { passed: true }; }`,
+        `async (page) => { ${name === "stability" ? `await page.addInitScript(${installAppStoreFixtures.toString()});` : ""} const englishScenario = ${language === "en" ? `async (target, flow, origin) => (${englishSmoke.toString()})(target, flow, origin, ${JSON.stringify(expectedEnglishLabels)})` : "undefined"}; const result = await (${test.toString()})(page, new URL(page.url()).origin, ${process.env.SIP_UI_CAPTURE === "1"}, englishScenario); if (result && result.passed === false) throw new Error(JSON.stringify(result)); return result ?? { passed: true }; }`,
       );
       const result = run("run-code", `--filename=${path}`);
       console.log(`UI_FLOW_OK ${language} ${name}`);

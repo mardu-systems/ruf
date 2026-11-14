@@ -50,7 +50,6 @@
   <div class="setting-row">
     <div class="setting-description">
       <label for="autostart-enabled">{$t("settings.autostart")}</label>
-      <p>{$t("settings.autostart_help")}</p>
       {#if !available}<p>
           {$t("settings.autostart_unavailable")}
         </p>{/if}
@@ -93,7 +92,7 @@
   </div>
   <div class="settings-form-actions settings-save-bar">
     <p>
-      {dirty ? $t("settings.unsaved_notice") : $t("settings.computer_scope")}
+      {dirty ? $t("settings.unsaved_notice") : ""}
     </p>
     <div class="settings-actions">
       <button

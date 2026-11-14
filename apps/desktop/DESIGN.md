@@ -35,6 +35,18 @@ Use the shared 4px control radius and 13px body text. Tonal surfaces and 1px
 borders provide hierarchy. Avoid decorative gradients, shadows and dashboard
 cards. Icons accompany clear labels; color alone never carries state.
 
+Keep number entry, number keys and the call button in stable rows. Up to three
+contact suggestions share a fixed-height strip with three stable columns. Each
+suggestion remains keyboard-reachable. Healthy registration and contact-permission states do
+not need repeated instructions below number entry. Missing notification permission
+uses a labeled header action instead of a banner above the phone content.
+
+Primary call controls precede variable status/security content and remain sticky
+while scrolling optional call tools. Settings keep shared loading, call, error,
+save and draft-navigation feedback in a bounded, scrollable status area below the
+form. Showing that feedback must not move the fields or discard drafts. Manage the
+selected account directly; keep registration timestamps in connection details.
+
 ## Interaction and accessibility
 
 - Use concise German labels, accessible account-specific action names, semantic

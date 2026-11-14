@@ -294,7 +294,6 @@
   let introductionStorage: Storage | null = null;
   let initialSnapshotReceived = false;
   let navigated = false;
-  let firstCallHint = $state(false);
   const sessionAudio = $derived(snapshot?.audioMode ?? null);
   const selectedAccount = $derived(
     snapshot?.accounts.find((a) => a.id === snapshot?.selectedAccountId),
@@ -381,7 +380,9 @@
 
   const callState = $derived(snapshot?.call ?? "idle");
   const callIdle = $derived(callState === "idle");
-  const registered = $derived(registration === "registered");
+  const registered = $derived(
+    registration === "registered" && selectedAccount?.enabled !== false,
+  );
   const canCall = $derived(
     nativeAvailable &&
       !audioUnknown &&
@@ -420,14 +421,16 @@
 
   const introRuntime = $derived.by(() => {
     if (browser) return "browser";
+    if (loading && !snapshot) return "loading";
     if (info?.telephony === "notLinked") return "unlinked";
-    return nativeAvailable ? "desktop" : "unavailable";
+    return nativeAvailable && snapshot ? "desktop" : "unavailable";
   });
   const setupLabel = $derived.by((): string => {
-    if (!error && !browser && !snapshot && info?.telephony !== "notLinked")
-      return $t("app.reload");
+    if (!browser && !snapshot && info?.telephony !== "notLinked")
+      return error ? "" : $t("app.reload");
     if (browser || !nativeAvailable) return $t("app.start");
-    if (selectedAccount?.enabled === false) return $t("app.enable_account");
+    if (selectedAccount?.enabled === false)
+      return $t("phone.start.account_settings");
     if (registration === "failed") return $t("app.check_connection");
     if (registration === "registering") return $t("app.registration_details");
     return $t("app.connect_account");
@@ -435,8 +438,7 @@
   const connectionHint = $derived.by((): string => {
     if (audioUnknown) return $t("app.audio_unknown");
     if (sessionAudio === "testTone") return $t("app.test_audio");
-    if (firstCallHint) return $t("app.ready_to_dial");
-    return $t("app.dial_hint");
+    return "";
   });
 
   function markIntroduction() {
@@ -488,15 +490,15 @@
         !introductionSeen &&
         !navigated &&
         next.call === "idle" &&
+        next.accounts.length === 0 &&
         next.registration === "unconfigured"
       )
         view = "start";
     }
     if (next.accounts.length) markIntroduction();
     if (next.registration === "registered") {
-      if (becameRegistered) firstCallHint = true;
       if (view === "start" && becameRegistered) selectView("dialer");
-    } else if (next.registration === "failed") firstCallHint = false;
+    }
   }
   async function refreshNativeState() {
     if (browser) return;
@@ -762,9 +764,7 @@
     if (!canCall || busy) return;
     const target = normalizeDialNumber(destination);
     if (!target) return;
-    if (await perform(() => dial(target))) {
-      firstCallHint = false;
-    }
+    await perform(() => dial(target));
   }
   async function placeContactCall(target: string) {
     if (!nativeAvailable || audioUnknown || !registered || !callIdle || busy)
@@ -834,6 +834,15 @@
       </div>
     </div>
     <div class="header-actions">
+      {#if notificationHint}<button
+          class="icon-button notification-hint"
+          type="button"
+          aria-label={$t("app.check_notifications")}
+          title={$t("app.notifications_unavailable")}
+          disabled={openingSettings}
+          onclick={() => void showSettings("notifications")}
+          ><Icon name="bell" size={16} /></button
+        >{/if}
       <button
         class="icon-button"
         type="button"
@@ -872,26 +881,13 @@
     </div>
   </header>
 
-  {#if notificationHint}
-    <div class="notification-hint" role="status">
-      <p>{$t("app.notifications_unavailable")}</p>
-      <button
-        class="text-button"
-        type="button"
-        disabled={openingSettings}
-        onclick={() => void showSettings("notifications")}
-        >{$t("app.check_notifications")}</button
-      >
-    </div>
-  {/if}
-
   {#if snapshot?.historyError}<p class="error-notice" role="alert">
       {$t("app.history_save_error")}
     </p>{/if}
   {#if error}<div class="error-notice">
       <div class="error-copy">
         <p role="alert">{$text(error)}</p>
-        {#if (!info || !snapshot) && !browser}<button
+        {#if (!info || !snapshot) && !browser && !(view === "start" && introRuntime === "unavailable")}<button
             class="text-button"
             type="button"
             disabled={loading || busy}
@@ -988,10 +984,12 @@
         runtime={introRuntime}
         {registration}
         hasAccount={(snapshot?.accounts.length ?? 0) > 0}
+        accountEnabled={selectedAccount?.enabled !== false}
+        callInProgress={!callIdle}
+        busy={busy || loading || openingSettings}
         {audioUnknown}
-        onsetup={() => {
-          void showSettings();
-        }}
+        onsetup={(section) => void showSettings(section)}
+        onretry={() => void refreshNativeState()}
         onexplore={() => selectView("dialer")}
       />
     {:else if view === "dialer"}
@@ -1001,15 +999,6 @@
             ? dialContacts.contacts
             : []}
           {matchGermanNumbers}
-          contactsHint={dialContacts?.permission === "authorized"
-            ? null
-            : dialContacts?.permission === "unsupported"
-              ? $t("app.contacts_unsupported")
-              : dialContacts?.permission === "restricted"
-                ? $t("app.contacts_restricted")
-                : dialContacts
-                  ? $t("app.contacts_after_permission")
-                  : $t("app.contacts_unavailable")}
           {canCall}
           {busy}
           {registered}
@@ -1020,12 +1009,7 @@
             void placeCall();
           }}
           onsetup={() => {
-            if (
-              !error &&
-              !browser &&
-              !snapshot &&
-              info?.telephony !== "notLinked"
-            )
+            if (!browser && !snapshot && info?.telephony !== "notLinked")
               void refreshNativeState();
             else if (nativeAvailable) void showSettings();
             else selectView("start");
@@ -1086,21 +1070,6 @@
 
 <style>
   .notification-hint {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 2px 10px;
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 11px;
-    line-height: 1.45;
-  }
-  .notification-hint p {
-    margin: 0;
-  }
-  .notification-hint button {
-    font-size: 11px;
+    color: var(--caution);
   }
 </style>

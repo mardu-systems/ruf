@@ -43,6 +43,7 @@
       "M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14",
     ],
     info: ["M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z", "M12 11v6M12 7h.01"],
+    bell: ["M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9", "M10 21h4"],
   } satisfies Record<string, string[]>;
   let { name, size = 20 }: { name: keyof typeof paths; size?: number } =
     $props();

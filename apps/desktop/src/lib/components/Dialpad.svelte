@@ -17,7 +17,6 @@
     setupEnabled,
     contacts = [],
     matchGermanNumbers = true,
-    contactsHint = null,
     oncall,
     onsetup,
   }: {
@@ -30,7 +29,6 @@
     setupEnabled: boolean;
     contacts?: readonly Contact[];
     matchGermanNumbers?: boolean;
-    contactsHint?: MessageValue | null;
     oncall: () => void;
     onsetup: () => void;
   } = $props();
@@ -132,7 +130,7 @@
             event.preventDefault();
         }}
         aria-invalid={invalidNumber}
-        aria-describedby="number-hint"
+        aria-describedby={invalidNumber ? "number-hint" : undefined}
         disabled={busy}
       />
       <button
@@ -153,36 +151,42 @@
         ><Icon name="backspace" size={19} /></button
       >
     </div>
-    <p id="number-hint" class="number-hint" aria-live="polite">
-      {invalidNumber
-        ? $t("phone.dial.invalid")
-        : value
-          ? $t("phone.dial.number")
-          : $t("phone.dial.hint")}
-    </p>
   </div>
-  {#if suggestions.length}<ul
-      class="dial-suggestions"
-      aria-label={$t("phone.dial.suggestions")}
-    >
-      {#each suggestions as suggestion (`${suggestion.contact.id}:${suggestion.phone.destination}`)}<li
-        >
-          <button
-            class="secondary-button"
-            type="button"
-            disabled={busy}
-            onclick={() => {
-              if (suggestion.phone.destination)
-                value = suggestion.phone.destination;
-            }}
-            ><strong>{suggestion.contact.name}</strong><span
-              >{suggestion.phone.label} · {suggestion.phone.number}</span
-            ></button
+  <div class="dial-context">
+    {#if invalidNumber}<p id="number-hint" class="number-hint" role="status">
+        {$t("phone.dial.invalid")}
+      </p>
+    {:else if !registered && setupLabel}<button
+        type="button"
+        class="text-button"
+        disabled={!setupEnabled}
+        onclick={onsetup}>{$text(setupLabel)}</button
+      >
+    {:else if connectionHint}<p class="number-hint" role="status">
+        {$text(connectionHint)}
+      </p>
+    {:else if suggestions.length}<ul
+        class="dial-suggestions"
+        aria-label={$t("phone.dial.suggestions")}
+      >
+        {#each suggestions as suggestion (`${suggestion.contact.id}:${suggestion.phone.destination}`)}<li
           >
-        </li>{/each}
-    </ul>{:else if contactsHint && value}<p class="number-hint">
-      {$text(contactsHint)}
-    </p>{/if}
+            <button
+              class="secondary-button"
+              title={`${suggestion.contact.name} · ${suggestion.phone.label} · ${suggestion.phone.number}`}
+              type="button"
+              disabled={busy}
+              onclick={() => {
+                if (suggestion.phone.destination)
+                  value = suggestion.phone.destination;
+              }}
+              ><strong>{suggestion.contact.name}</strong><span
+                >{suggestion.phone.label} · {suggestion.phone.number}</span
+              ></button
+            >
+          </li>{/each}
+      </ul>{/if}
+  </div>
   <div class="keypad" aria-label={$t("phone.dial.keypad")}>
     {#each keys as digit}
       <button
@@ -213,12 +217,4 @@
     disabled={!canCall || busy}
     ><Icon name="phone" size={18} />{$t("phone.dial.call")}</button
   >
-  <div class="dial-help">
-    {#if !registered}<button
-        type="button"
-        class="text-button"
-        disabled={!setupEnabled}
-        onclick={onsetup}>{$text(setupLabel)}</button
-      >{:else}<span role="status">{$text(connectionHint)}</span>{/if}
-  </div>
 </form>

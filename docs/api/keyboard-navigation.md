@@ -41,6 +41,39 @@ No new invoke command, DTO field, error code or HTTP status mapping is introduce
 See [contacts](contacts.md) and [history](history.md) for validation, permissions,
 query matching and existing `PhoneError` classifications.
 
+## Stable controls and feedback
+
+The dialer's number entry, number keys and call action retain their positions
+when suggestions or validation messages change. Up to three existing contact
+suggestions occupy one fixed-height strip with three columns. All remain in view
+and keyboard-reachable; selecting one fills the destination and never
+places a call. Invalid input keeps its existing accessible description and
+normalization rules. Contact permission and availability remain visible in the
+Contacts view instead of repeating a permission hint for every number entered.
+
+Primary call controls stay above variable status/security content and remain
+visible while scrolling the in-call keypad or transfer tools. The controls reuse
+the same native acknowledgment, busy, hold and token guards as before.
+
+Settings put shared status and recovery messages in a bounded, independently
+scrollable area below the form. Incoming calls and save feedback do not move
+the fields. Errors retain their retry action; pending navigation retains the
+existing continue/discard controls and restores focus to the edited field.
+The phone's notification-permission indicator is a labeled header button opening
+the existing notification settings. It never requests permission automatically.
+
+## First-run help
+
+First-run help is shown automatically only when there is no saved account and the
+local introduction has not been dismissed. Saved disabled accounts do not restart
+onboarding. Explicit Help remains available and follows current runtime, account
+activation and call state. Loading never implies missing configuration; missing
+status offers `get_app_info` / `get_engine_snapshot` retry, not account creation.
+Account actions open the existing SIP accounts section; audio/build diagnostics
+open Diagnostics & Help. During a call, help returns to the current conversation
+instead of offering a new call. Browser/portable previews never claim calling is
+ready. Onboarding requests no system permission and introduces no new IPC/DTO.
+
 ## Shortcuts
 
 | Shortcut (Cmd on macOS, Ctrl on Windows) | Action                                                                                                              |
