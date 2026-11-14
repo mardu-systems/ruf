@@ -55,6 +55,12 @@ Primary call controls stay above variable status/security content and remain
 visible while scrolling the in-call keypad or transfer tools. The controls reuse
 the same native acknowledgment, busy, hold and token guards as before.
 
+Keyboard scrolling in call tools uses the measured height of the sticky controls,
+including wrapped translated labels. A focused tone key or transfer destination
+must remain below those controls and above the bottom navigation. Long caller
+names use a two-line visual limit and automatic script direction; their full
+accessible text and title preserve the original name.
+
 Settings put shared status and recovery messages in a bounded, independently
 scrollable area below the form. Incoming calls and save feedback do not move
 the fields. Errors retain their retry action; pending navigation retains the
@@ -63,6 +69,15 @@ The phone's notification-permission indicator is a labeled header button opening
 the existing notification settings. It never requests permission automatically.
 
 ## First-run help
+
+If a window's UI module cannot load, the already-loaded entry point displays a
+localized recovery view and focuses **Reload window**. That action reloads the
+current window URL, retaining the requested settings section. It does not issue
+account/call commands. The fallback uses the shared styles and translations and
+does not expose the underlying exception text. This covers window-module loading
+and initial mounting failures after the entry point/localization code has loaded.
+The recovery text follows committed language changes from another window and
+releases its translation subscription when the window unloads.
 
 First-run help is shown automatically only when there is no saved account and the
 local introduction has not been dismissed. Saved disabled accounts do not restart

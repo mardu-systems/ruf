@@ -477,6 +477,7 @@ fieldset {
   align-items: center;
   padding: 20px 14px 14px;
   overflow-y: auto;
+  scroll-padding-block: calc(var(--call-controls-height, 0px) + 24px) 12px;
 }
 .call-symbol {
   color: var(--accent);
@@ -493,6 +494,10 @@ fieldset {
   letter-spacing: -0.02em;
   margin: 0;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .call-timer {
   font-variant-numeric: tabular-nums;

@@ -157,6 +157,8 @@
   let targetError = $state<MessageValue>("");
   let targetInput = $state<HTMLInputElement>();
   let transferButton = $state<HTMLButtonElement>();
+  let panel: HTMLElement;
+  let controls: HTMLDivElement;
   let contactsOpen = $state(false);
   let contacts = $state<ContactsSnapshot | null>(null);
   let contactsLoading = $state(false);
@@ -194,6 +196,15 @@
   }
   onMount(() => {
     mounted = true;
+    // Localized/wrapped controls determine the safe inset for keyboard scrolling.
+    const updateInset = () =>
+      panel.style.setProperty(
+        "--call-controls-height",
+        `${controls.offsetHeight}px`,
+      );
+    const resize = new ResizeObserver(updateInset);
+    updateInset();
+    resize.observe(controls);
     let unlisten: UnlistenFn | undefined;
     const refresh = () => {
       if (contactsOpen) void refreshContacts();
@@ -210,6 +221,7 @@
         });
     return () => {
       mounted = false;
+      resize.disconnect();
       ++contactsRequest;
       unlisten?.();
       window.removeEventListener("focus", refresh);
@@ -277,6 +289,7 @@
 </script>
 
 <section
+  bind:this={panel}
   class="call-panel"
   class:compact-call={compact}
   class:has-controls={established(call) || calls.length > 1}
@@ -346,7 +359,7 @@
           ? ` · ${accounts.find((account) => account.id === call.accountId)?.name}`
           : ""}
       </p>
-      <h1 class="call-peer">{selectedPeer}</h1>
+      <h1 class="call-peer" dir="auto" title={selectedPeer}>{selectedPeer}</h1>
       {#if (call.destination ?? call.caller?.number) && (call.destination ?? call.caller?.number) !== selectedPeer}<p
           class="call-number"
         >
@@ -360,7 +373,7 @@
     >
       {elapsed}
     </p>{/if}
-  <div class="call-controls">
+  <div class="call-controls" bind:this={controls}>
     <div class="call-actions">
       {#if call.state === "incoming"}<button
           class="primary-button"
