@@ -153,3 +153,58 @@ macosTest(
     }
   },
 );
+
+macosTest("OpenSSL probe rejects archives for another macOS CPU", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ruf-openssl-cpu-"));
+  try {
+    const source = join(directory, "fixture.c");
+    writeFileSync(source, "int fixture(void) { return 0; }\n");
+    for (const cpu of ["arm64", "x86_64"]) {
+      const prefix = join(directory, cpu);
+      mkdirSync(join(prefix, "include/openssl"), { recursive: true });
+      mkdirSync(join(prefix, "lib"));
+      writeFileSync(join(prefix, "include/openssl/ssl.h"), "\n");
+      writeFileSync(
+        join(prefix, "include/openssl/opensslv.h"),
+        '#define OPENSSL_VERSION_STR "3.0.0"\n',
+      );
+      const object = join(prefix, "fixture.o");
+      execFileSync("clang", [
+        "-arch",
+        cpu,
+        "-mmacosx-version-min=14.0",
+        "-c",
+        source,
+        "-o",
+        object,
+      ]);
+      for (const library of ["ssl", "crypto"])
+        execFileSync("ar", [
+          "rcs",
+          join(prefix, `lib/lib${library}.a`),
+          object,
+        ]);
+      const probe = (requested: string) =>
+        spawnSync(
+          "cmake",
+          [
+            "-S",
+            resolve("native/openssl-probe"),
+            "-B",
+            join(directory, `${cpu}-${requested}`),
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
+            `-DCMAKE_OSX_ARCHITECTURES=${requested}`,
+            `-DOPENSSL_ROOT_DIR=${prefix}`,
+          ],
+          { encoding: "utf8" },
+        );
+      expect(probe(cpu).status).toBe(0);
+      const mismatch = probe(cpu === "arm64" ? "x86_64" : "arm64");
+      expect(mismatch.status).not.toBe(0);
+      expect(mismatch.stderr).toContain("does not contain macOS architecture");
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
