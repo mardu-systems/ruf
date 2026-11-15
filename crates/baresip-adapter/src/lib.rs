@@ -7,8 +7,12 @@ use phone_core::TelephonyStatus;
 
 mod call_journal;
 pub use call_journal::CallObserver;
-#[cfg(feature = "native")]
 mod dialogs;
+// The portable build uses a subset; native builds consume the complete private ABI.
+#[allow(dead_code)]
+mod protocol {
+    include!(concat!(env!("OUT_DIR"), "/protocol.rs"));
+}
 mod engine;
 pub use engine::Engine;
 mod notifications;

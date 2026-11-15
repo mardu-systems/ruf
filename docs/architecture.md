@@ -31,6 +31,16 @@ callbacks update a separate snapshot mutex. Events and polling project real stat
 into the frontend. Browser preview explicitly reports the absent desktop runtime;
 its regression fixtures provide synthetic IPC only.
 
+Each live dialog has one authoritative `CallSnapshot`. Native events update that
+dialog directly, independently of selection. Selected-call compatibility fields
+are derived only when reading a snapshot. A queued outgoing attempt reserves its
+token before native allocation; completed-call events remain available after the
+last dialog closes. Account/audio completion waits use a condition variable on
+the same state mutex, including rejection and shutdown; no delayed native request
+is abandoned. The private [native adapter ABI](api/native-adapter.md) separates
+account, call and audio payloads and shares its numeric codes with Rust through
+build-time generation.
+
 Native support is opt-in through Cargo feature `native`. Portable builds reject
 engine startup and report `notLinked`. Native builds link pinned static baresip,
 libre and OpenSSL plus selected modules. `linked` describes compilation only.

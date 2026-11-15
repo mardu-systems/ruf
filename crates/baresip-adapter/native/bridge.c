@@ -30,18 +30,7 @@ typedef pthread_mutex_t queue_lock;
 #define LOCK_CLOSE(p) (void)pthread_mutex_destroy(p)
 #endif
 
-/* All strings are borrowed until this synchronous callback returns. */
-struct sip_event {
-    int kind, code;
-    uint32_t account_id;
-    uint64_t call_generation;
-    const char *caller_name, *caller_number, *detail;
-};
-typedef void (*event_callback)(const struct sip_event *event, void *arg);
-enum { EV_READY=1, EV_REGISTERING, EV_REGISTERED, EV_REG_FAILED,
-       EV_CALLING, EV_RINGING, EV_INCOMING, EV_ACTIVE, EV_CLOSED, EV_ERROR, EV_STOPPED, EV_STALE, EV_REMOVED, EV_REMOVE_FAILED, EV_ACCOUNT_APPLIED, EV_ACCOUNT_REJECTED, EV_AUDIO_APPLIED, EV_AUDIO_FAILED, EV_RING_STARTED, EV_RING_STOPPED, EV_ANSWER_FAILED, EV_BUSY_INCOMING, EV_DIAL_STARTED, EV_DIAL_FAILED, EV_LOCAL_END, EV_INTERRUPTING,
-       EV_PROGRESS, EV_HOLD, EV_RESUME, EV_DTMF_START, EV_DTMF_END, EV_TRANSFER_FAILED, EV_REDIRECT, EV_ANSWER_CLOSED, EV_TEST_STARTED, EV_TEST_LEVEL, EV_TEST_STOPPED, EV_TEST_FAILED, EV_SELECTED, EV_MUTED, EV_LOCAL_HOLD_PENDING, EV_LOCAL_HOLD_DONE, EV_CONTROL_FAILED, EV_TRANSFER_PENDING, EV_TRANSFER_RESULT, EV_CONTROL_REJECTED, EV_RECOVERY_FAILED, EV_RECOVERING, EV_CONSULT_FAILED, EV_CALL_ERROR, EV_SECURITY, EV_BLF_NOTIFY, EV_BLF_UNKNOWN };
-enum { OP_ACCOUNT=1, OP_DIAL, OP_ANSWER, OP_HANGUP, OP_STOP, OP_REMOVE, OP_SOUND, OP_PREVIEW, OP_PREVIEW_STOP, OP_SOUND_RESTORE, OP_REJECT, OP_TEST_MIC, OP_TEST_SPEAKER, OP_TEST_STOP, OP_DISABLE, OP_ENABLE, OP_MUTE, OP_HOLD, OP_TRANSFER, OP_CONSULT, OP_SWITCH, OP_CANCEL_CONSULT, OP_COMPLETE_TRANSFER, OP_DTMF };
+#include "bridge.h"
 
 struct request {
     struct request *next;
@@ -50,6 +39,10 @@ struct request {
     uint64_t call_generation;
     char *registrar, *username, *password, *destination, *auth_username, *outbound_proxy, *monitored_extensions;
     int transport, media_security;
+    bool enabled;
+    char *device, *input_device, *output_device, *ring_device;
+    int ringtone_variant;
+    unsigned ringtone_volume;
 };
 struct sip_account {
     uint32_t id;
@@ -362,11 +355,11 @@ static void test_tick(void *arg) {
 }
 static int start_audio_test(struct engine *e, const struct request *r) {
     if (e->current->call || e->test_id || e->preview) return EBUSY;
-    if (!r->call_generation || strlen(r->registrar) > 127) return EINVAL;
+    if (!r->call_generation || strlen(r->device) > 127) return EINVAL;
     bool microphone = r->operation == OP_TEST_MIC;
     int error = 0;
     if (!e->audio_mode) {
-        error = sip_audio_device_available(r->registrar, microphone);
+        error = sip_audio_device_available(r->device, microphone);
         if (!error) error = ensure_platform_audio(e);
         if (error) return error;
     }
@@ -376,7 +369,7 @@ static int start_audio_test(struct engine *e, const struct request *r) {
     if (microphone) {
         struct ausrc_prm parameters = { .srate=48000, .ch=1, .ptime=20, .fmt=AUFMT_S16LE };
         error = ausrc_alloc(&e->test_source, baresip_ausrcl(), e->audio_mode ? "ausine" : platform_audio(),
-            &parameters, e->audio_mode ? "440" : *r->registrar ? r->registrar : "default", test_read, test_source_error, e);
+            &parameters, e->audio_mode ? "440" : *r->device ? r->device : "default", test_read, test_source_error, e);
     } else {
         const uint32_t rate = 48000, samples = rate * 2;
         struct mbuf *tone = mbuf_alloc(samples * sizeof(int16_t));
@@ -389,7 +382,7 @@ static int start_audio_test(struct engine *e, const struct request *r) {
         }
         tone->pos = 0;
         error = play_tone(&e->test_player, baresip_player(), tone, rate, 1, 1,
-            e->audio_mode ? "aufile" : platform_audio(), e->audio_mode ? e->recording : *r->registrar ? r->registrar : "default");
+            e->audio_mode ? "aufile" : platform_audio(), e->audio_mode ? e->recording : *r->device ? r->device : "default");
         mem_deref(tone);
     }
     if (error) { e->test_source = mem_deref(e->test_source); e->test_player = mem_deref(e->test_player); return error; }
@@ -401,25 +394,21 @@ static int start_audio_test(struct engine *e, const struct request *r) {
 }
 static int apply_sound(struct engine *e, const struct request *r) {
     if (e->current->call || e->test_id) return EBUSY;
-    if (strlen(r->registrar) > 127 || strlen(r->username) > 127 || strlen(r->password) > 127) return EINVAL;
+    if (strlen(r->input_device) > 127 || strlen(r->output_device) > 127 || strlen(r->ring_device) > 127) return EINVAL;
     if (r->operation != OP_SOUND_RESTORE) {
-        int error = sip_audio_device_available(r->registrar, 1);
-        if (!error) error = sip_audio_device_available(r->username, 0);
-        if (!error) error = sip_audio_device_available(r->password, 0);
+        int error = sip_audio_device_available(r->input_device, 1);
+        if (!error) error = sip_audio_device_available(r->output_device, 0);
+        if (!error) error = sip_audio_device_available(r->ring_device, 0);
         if (error) return error;
     }
-    unsigned enabled, volume;
-    int variant;
-    char trailing;
-    if (sscanf(r->destination, "%u:%d:%u%c", &enabled, &variant, &volume, &trailing) != 3 ||
-        enabled > 1 || variant < 0 || variant > 2 || volume > 100) return EINVAL;
+    if (r->ringtone_variant < 0 || r->ringtone_variant > 2 || r->ringtone_volume > 100) return EINVAL;
     stop_ring(e);
-    str_ncpy(e->input_device, r->registrar, sizeof(e->input_device));
-    str_ncpy(e->output_device, r->username, sizeof(e->output_device));
-    str_ncpy(e->ring_device, r->password, sizeof(e->ring_device));
-    e->ringtone_enabled = enabled != 0;
-    e->ringtone_variant = variant;
-    e->ringtone_volume = volume;
+    str_ncpy(e->input_device, r->input_device, sizeof(e->input_device));
+    str_ncpy(e->output_device, r->output_device, sizeof(e->output_device));
+    str_ncpy(e->ring_device, r->ring_device, sizeof(e->ring_device));
+    e->ringtone_enabled = r->enabled;
+    e->ringtone_variant = r->ringtone_variant;
+    e->ringtone_volume = r->ringtone_volume;
     if (!e->audio_mode) {
         struct config_audio *audio = &conf_config()->audio;
         str_ncpy(audio->src_dev, *e->input_device ? e->input_device : "default", sizeof(audio->src_dev));
@@ -440,6 +429,7 @@ static void free_request(struct request *r) {
         size_t n = strlen(r->password);
         while (n--) *p++ = 0;
     }
+    free(r->device); free(r->input_device); free(r->output_device); free(r->ring_device);
     free(r->monitored_extensions); free(r->auth_username); free(r->outbound_proxy); free(r->registrar); free(r->username); free(r->password); free(r->destination); free(r);
 }
 static void remove_pending(struct engine *e, struct request *r) {
@@ -772,7 +762,7 @@ static void queue_handler(int id, void *data, void *arg) {
             for (size_t i = 0; i < 8; ++i) if (!e->accounts[i].id) { account = &e->accounts[i]; break; }
         }
         if (!account) { error = ENOSPC; break; }
-        if (r->operation == OP_ACCOUNT && !strcmp(r->destination, "0")) {
+        if (r->operation == OP_ACCOUNT && !r->enabled) {
             struct ua *previous = account->ua;
             account->blf = mem_deref(account->blf);
             account->ua = NULL;
@@ -910,10 +900,10 @@ static void queue_handler(int id, void *data, void *arg) {
         break;
     case OP_PREVIEW:
         if (e->current->call || e->test_id) error = EBUSY;
-        else if (strlen(r->registrar) > 127) error = EINVAL;
+        else if (strlen(r->device) > 127) error = EINVAL;
         else {
-            error = sip_audio_device_available(r->registrar, 0);
-            if (!error) error = start_ring(e, r->registrar, true);
+            error = sip_audio_device_available(r->device, 0);
+            if (!error) error = start_ring(e, r->device, true);
         }
         emit(e, error ? EV_AUDIO_FAILED : EV_AUDIO_APPLIED, error);
         break;
@@ -1090,40 +1080,91 @@ int sip_engine_run(void *handle) {
     return error;
 }
 
-int sip_engine_request(void *handle, int operation, uint32_t account_id, uint64_t call_generation, const char *registrar,
-                       const char *username, const char *password, const char *destination, int transport, int media_security, const char *auth_username, const char *outbound_proxy, const char *monitored_extensions) {
-    struct engine *e = handle;
-    struct request *r;
+/* Takes ownership on every path. Allocation and native handles stay private. */
+static int queue_request(struct engine *e, struct request *r) {
     int error;
     unsigned pending = 0;
-    if (operation == OP_STOP) {
-        LOCK(&e->lock); e->stop_requested = true; UNLOCK(&e->lock);
-        return 0;
-    }
-    if (sip_blf_validate_targets(monitored_extensions ? monitored_extensions : "")) return EINVAL;
-    r = calloc(1, sizeof(*r));
-    if (!r) return ENOMEM;
-    r->transport = transport; r->media_security = media_security;
-    r->auth_username = copy_string(auth_username); r->outbound_proxy = copy_string(outbound_proxy);
-    r->monitored_extensions = copy_string(monitored_extensions);
-    r->operation = operation;
-    r->account_id = account_id;
-    r->call_generation = call_generation;
-    r->registrar = copy_string(registrar); r->username = copy_string(username);
-    r->password = copy_string(password); r->destination = copy_string(destination);
-    if (!r->registrar || !r->username || !r->password || !r->destination || !r->auth_username || !r->outbound_proxy || !r->monitored_extensions) { free_request(r); return ENOMEM; }
     LOCK(&e->lock);
     for (struct request *p = e->pending; p; p = p->next) ++pending;
     if (!e->running || e->stop_requested) error = ENOTCONN;
     else if (pending >= 16) error = EBUSY;
     else {
         r->next = e->pending; e->pending = r;
-        error = mqueue_push(e->queue, operation, r);
+        error = mqueue_push(e->queue, r->operation, r);
         if (error) remove_pending(e, r);
     }
     UNLOCK(&e->lock);
     if (error) free_request(r);
     return error;
+}
+
+int sip_engine_account(void *handle, int operation, uint32_t account_id,
+                       const struct sip_account_config *config) {
+    if (operation != OP_ACCOUNT && operation != OP_ENABLE && operation != OP_DISABLE) return EINVAL;
+    if (operation != OP_DISABLE && !config) return EINVAL;
+    if (config && (config->enabled < 0 || config->enabled > 1 ||
+        sip_blf_validate_targets(config->monitored_extensions ? config->monitored_extensions : ""))) return EINVAL;
+    struct request *r = calloc(1, sizeof(*r));
+    if (!r) return ENOMEM;
+    r->operation = operation; r->account_id = account_id;
+    if (config) {
+        r->transport = config->transport; r->media_security = config->media_security;
+        r->enabled = config->enabled != 0;
+        r->registrar = copy_string(config->registrar); r->username = copy_string(config->username);
+        r->password = copy_string(config->password); r->auth_username = copy_string(config->auth_username);
+        r->outbound_proxy = copy_string(config->outbound_proxy);
+        r->monitored_extensions = copy_string(config->monitored_extensions);
+        if (!r->registrar || !r->username || !r->password || !r->auth_username ||
+            !r->outbound_proxy || !r->monitored_extensions) { free_request(r); return ENOMEM; }
+    }
+    return queue_request(handle, r);
+}
+
+int sip_engine_command(void *handle, int operation, uint32_t account_id,
+                       uint64_t generation, const char *destination, int enabled) {
+    if (operation != OP_DIAL && operation != OP_ANSWER && operation != OP_HANGUP &&
+        operation != OP_REMOVE && operation != OP_REJECT &&
+        (operation < OP_MUTE || operation > OP_DTMF)) return EINVAL;
+    if (enabled < 0 || enabled > 1) return EINVAL;
+    struct request *r = calloc(1, sizeof(*r));
+    if (!r) return ENOMEM;
+    r->operation = operation; r->account_id = account_id;
+    r->call_generation = generation; r->enabled = enabled != 0;
+    r->destination = copy_string(destination);
+    if (!r->destination) { free_request(r); return ENOMEM; }
+    return queue_request(handle, r);
+}
+
+int sip_engine_sound(void *handle, int restore, const struct sip_sound_settings *settings) {
+    if (!settings || settings->ringtone_enabled < 0 || settings->ringtone_enabled > 1) return EINVAL;
+    struct request *r = calloc(1, sizeof(*r));
+    if (!r) return ENOMEM;
+    r->operation = restore ? OP_SOUND_RESTORE : OP_SOUND;
+    r->input_device = copy_string(settings->input_device);
+    r->output_device = copy_string(settings->output_device);
+    r->ring_device = copy_string(settings->ring_device);
+    r->enabled = settings->ringtone_enabled != 0;
+    r->ringtone_variant = settings->ringtone_variant;
+    r->ringtone_volume = settings->ringtone_volume;
+    if (!r->input_device || !r->output_device || !r->ring_device) { free_request(r); return ENOMEM; }
+    return queue_request(handle, r);
+}
+
+int sip_engine_audio(void *handle, int operation, uint64_t generation, const char *device) {
+    if (operation != OP_PREVIEW && operation != OP_PREVIEW_STOP &&
+        operation != OP_TEST_MIC && operation != OP_TEST_SPEAKER && operation != OP_TEST_STOP) return EINVAL;
+    struct request *r = calloc(1, sizeof(*r));
+    if (!r) return ENOMEM;
+    r->operation = operation; r->call_generation = generation;
+    r->device = copy_string(device);
+    if (!r->device) { free_request(r); return ENOMEM; }
+    return queue_request(handle, r);
+}
+
+int sip_engine_stop(void *handle) {
+    struct engine *e = handle;
+    LOCK(&e->lock); e->stop_requested = true; UNLOCK(&e->lock);
+    return 0;
 }
 
 void sip_engine_destroy(void *handle) {

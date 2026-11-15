@@ -1,6 +1,28 @@
 //! Compile platform contacts independently of the opt-in native SIP engine.
 
 fn main() {
+    println!("cargo:rerun-if-changed=native/protocol.def");
+    println!("cargo:rerun-if-changed=native/bridge.h");
+    let codes = std::fs::read_to_string("native/protocol.def").expect("private ABI codes");
+    let mut rust = String::new();
+    for line in codes
+        .lines()
+        .filter_map(|line| line.strip_prefix("SIP_CODE("))
+    {
+        let (name, value) = line
+            .strip_suffix(')')
+            .expect("ABI code terminator")
+            .split_once(',')
+            .expect("ABI name and value");
+        let value: i32 = value.trim().parse().expect("numeric ABI code");
+        rust.push_str(&format!("pub(crate) const {name}: i32 = {value};\n"));
+    }
+    std::fs::write(
+        std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output"))
+            .join("protocol.rs"),
+        rust,
+    )
+    .expect("generated private ABI codes");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rerun-if-changed=native/contacts.m");
         println!("cargo:rerun-if-changed=native/contacts.h");

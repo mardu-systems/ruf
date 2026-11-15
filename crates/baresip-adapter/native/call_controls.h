@@ -303,16 +303,16 @@ static void control_request(struct engine *e, struct request *r) {
         if (!e->dtmf_active && !tmr_isrunning(&e->dtmf_timer)) dtmf_tick(e);
         break;
     case OP_MUTE:
-        dialog->muted = !strcmp(r->destination, "1");
+        dialog->muted = r->enabled;
         audio_mute(call_audio(dialog->call), dialog->muted);
         emit(e, EV_MUTED, dialog->muted);
         break;
     case OP_HOLD:
-        if (!strcmp(r->destination, "0") && other->call && !call_is_onhold(other->call)) {
+        if (!r->enabled && other->call && !call_is_onhold(other->call)) {
             e->control_action = OP_SWITCH;
             e->action_target = dialog;
             begin_hold(e, other, true);
-        } else { dialog->hold_explicit = true; begin_hold(e, dialog, !strcmp(r->destination, "1")); }
+        } else { dialog->hold_explicit = true; begin_hold(e, dialog, r->enabled); }
         break;
     case OP_CONSULT:
         if (other->call || strlen(r->destination) > 64) { error = EBUSY; break; }

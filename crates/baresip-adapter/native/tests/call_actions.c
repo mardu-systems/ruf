@@ -43,6 +43,72 @@ static void execute(struct engine *engine, int operation) {
     queue_handler(operation, request, engine);
 }
 
+static unsigned payloads;
+static void inspect_payload(int id, void *data, void *arg) {
+    struct engine *engine = arg;
+    struct request *r = data;
+    assert(id == r->operation);
+    remove_pending(engine, r);
+    switch (payloads++) {
+    case 0:
+        assert(id == OP_ACCOUNT && r->account_id == 77 && !r->enabled);
+        assert(!strcmp(r->registrar, "pbx.test") && !strcmp(r->username, "100"));
+        assert(!strcmp(r->password, "fixture-password"));
+        assert(!strcmp(r->monitored_extensions, "101\n102"));
+        assert(r->transport == 2 && r->media_security == 1);
+        break;
+    case 1:
+        assert(id == OP_SOUND_RESTORE && r->enabled);
+        assert(!strcmp(r->input_device, "mic") && !strcmp(r->output_device, "speaker"));
+        assert(!strcmp(r->ring_device, "ring") && !r->password);
+        assert(r->ringtone_variant == 2 && r->ringtone_volume == 37);
+        break;
+    case 2:
+        assert(id == OP_HOLD && r->enabled && r->call_generation == 42);
+        assert(!r->password && !r->device);
+        break;
+    case 3:
+        assert(id == OP_TEST_MIC && r->call_generation == 43);
+        assert(!strcmp(r->device, "mic") && !r->registrar);
+        break;
+    default:
+        assert(id == OP_HANGUP);
+    }
+    free_request(r);
+    if (payloads == 16) re_cancel();
+}
+
+static void request_payloads(void) {
+    struct engine engine = {0};
+    char password[] = "fixture-password", input[] = "mic";
+    const struct sip_account_config account = {
+        "pbx.test", "100", password, "auth", "proxy.test", "101\n102", 2, 1, 0
+    };
+    const struct sip_sound_settings sound = { input, "speaker", "ring", 1, 2, 37 };
+    LOCK_INIT(&engine.lock);
+    assert(!libre_init());
+    assert(!mqueue_alloc(&engine.queue, inspect_payload, &engine));
+    engine.running = true;
+    assert(!sip_engine_account(&engine, OP_ACCOUNT, 77, &account));
+    assert(!sip_engine_sound(&engine, 1, &sound));
+    assert(!sip_engine_command(&engine, OP_HOLD, 77, 42, NULL, 1));
+    assert(!sip_engine_audio(&engine, OP_TEST_MIC, 43, input));
+    /* All inputs are borrowed only until return, including the secret. */
+    memset(password, 'x', sizeof(password) - 1);
+    input[0] = 'x';
+    for (unsigned i = 4; i < 16; ++i)
+        assert(!sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0));
+    assert(sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0) == EBUSY);
+    /* Stop must succeed even with a saturated queue, without an allocation. */
+    assert(!sip_engine_stop(&engine) && engine.stop_requested);
+    assert(sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0) == ENOTCONN);
+    assert(!re_main(NULL));
+    assert(payloads == 16 && !engine.pending);
+    mem_deref(engine.queue);
+    libre_close();
+    LOCK_CLOSE(&engine.lock);
+}
+
 int main(void) {
     struct engine engine = {0};
     LOCK_INIT(&engine.lock);
@@ -92,6 +158,7 @@ int main(void) {
     assert(engine.accounts[0].id == 77 && engine.accounts[0].ua == (struct ua *)&engine);
     assert(engine.current->call && engine.current->generation == 42);
     LOCK_CLOSE(&engine.lock);
+    request_payloads();
     puts("call_actions: answer failure retains ringtone; queued duplicate hangup and losing dial preserve the current call");
     return 0;
 }
