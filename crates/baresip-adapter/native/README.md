@@ -68,10 +68,12 @@ Real lifecycle tests and the Asterisk tone-echo example exercise the actual
 library. Hardware devices and Windows runtime still require platform execution.
 
 The [private ABI contract](../../../docs/api/native-adapter.md) describes the
-separate account, call, sound and diagnostic requests in `bridge.h`. Its event and
+single named request in `bridge.h`. Its event and
 operation codes come from `protocol.def` for both C and generated private Rust
 constants. Audio devices and mute/hold flags have named fields; they are not
-encoded as account credentials or destination strings. Queue allocation,
+encoded as account credentials or destination strings. C copies a request and
+its populated strings into one owned allocation. Rust owns the callback context
+as a Box and drops it after joining, including failed startup. Queue allocation,
 password wiping, generation guards and the allocation-free stop flag retain
 their existing ownership and thread boundaries. Rust updates each live dialog
 directly and derives the selected-call view on reads. Condition notifications

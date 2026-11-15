@@ -278,7 +278,7 @@ static void control_tick(void *arg) {
     e->current = e->selected;
     tmr_start(&e->control_timer, 20, control_tick, e);
 }
-static void control_request(struct engine *e, struct request *r) {
+static void control_request(struct engine *e, const struct sip_request *r) {
     struct native_dialog *dialog = NULL;
     for (size_t i = 0; i < 2; ++i)
         if (e->dialogs[i].call && e->dialogs[i].generation == r->call_generation) dialog = &e->dialogs[i];
@@ -328,16 +328,11 @@ static void control_request(struct engine *e, struct request *r) {
         e->action_target = dialog;
         begin_hold(e, other, true);
         break;
-    case OP_CANCEL_CONSULT: {
-        struct native_dialog *consultation = dialog->consultation ? dialog : other;
-        if (!consultation->call || !consultation->consultation) { error = EINVAL; break; }
-        struct native_dialog *parent = consultation == &e->dialogs[0] ? &e->dialogs[1] : &e->dialogs[0];
-        parent->return_held = false;
-        e->current = consultation;
+    case OP_CANCEL_CONSULT:
+        other->return_held = false;
         emit(e, EV_LOCAL_END, 0);
-        ua_hangup(consultation->ua, consultation->call, 0, NULL);
+        ua_hangup(dialog->ua, dialog->call, 0, NULL);
         break;
-    }
     case OP_TRANSFER:
     case OP_COMPLETE_TRANSFER:
         if (r->operation == OP_TRANSFER && other->call) { error = EBUSY; break; }

@@ -15,20 +15,15 @@ struct sip_event {
     const char *caller_name, *caller_number, *detail;
 };
 typedef void (*event_callback)(const struct sip_event *event, void *arg);
-struct sip_account_config {
-    const char *registrar, *username, *password, *auth_username, *outbound_proxy, *monitored_extensions;
-    int transport, media_security, enabled;
-};
-struct sip_sound_settings {
-    const char *input_device, *output_device, *ring_device;
-    int ringtone_enabled, ringtone_variant;
+/* Only fields used by operation are populated; all strings are borrowed. */
+struct sip_request {
+    int operation;
+    uint32_t account_id;
+    uint64_t call_generation;
+    int transport, media_security, enabled, ringtone_variant;
     unsigned ringtone_volume;
+    const char *registrar, *username, *password, *auth_username, *outbound_proxy, *monitored_extensions;
+    const char *destination, *device, *input_device, *output_device, *ring_device;
 };
-int sip_engine_account(void *handle, int operation, uint32_t account_id,
-                       const struct sip_account_config *config);
-int sip_engine_command(void *handle, int operation, uint32_t account_id,
-                       uint64_t generation, const char *destination, int enabled);
-int sip_engine_sound(void *handle, int restore, const struct sip_sound_settings *settings);
-int sip_engine_audio(void *handle, int operation, uint64_t generation, const char *device);
-int sip_engine_stop(void *handle);
+int sip_engine_request(void *handle, const struct sip_request *request);
 #endif

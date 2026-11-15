@@ -78,11 +78,6 @@ impl EngineState {
                 new_dialog(generation, account_id, state)
             };
             call.consultation = !self.snapshot.calls.is_empty();
-            call.destination = self
-                .call_destinations
-                .get(&generation)
-                .cloned()
-                .or(call.destination);
             self.snapshot.calls.push(call);
         }
         self.call_generation = generation;
@@ -103,7 +98,6 @@ impl EngineState {
             None
         };
         self.local_endings.remove(&generation);
-        self.call_destinations.remove(&generation);
         if self.snapshot.calls.len() == 1 {
             self.snapshot.calls[0].consultation = false;
         }

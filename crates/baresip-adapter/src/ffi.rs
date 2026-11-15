@@ -41,27 +41,29 @@ struct NativeEvent {
     detail: *const std::ffi::c_char,
 }
 
-// Mirrored by native/bridge.h; all pointers are borrowed until the request returns.
+// Mirrored by bridge.h. Strings stay borrowed until submit returns.
 #[repr(C)]
-struct NativeAccountConfig {
+#[derive(Default)]
+struct NativeRequest {
+    operation: i32,
+    account_id: u32,
+    call_generation: u64,
+    transport: i32,
+    media_security: i32,
+    enabled: i32,
+    ringtone_variant: i32,
+    ringtone_volume: u32,
     registrar: *const std::ffi::c_char,
     username: *const std::ffi::c_char,
     password: *const std::ffi::c_char,
     auth_username: *const std::ffi::c_char,
     outbound_proxy: *const std::ffi::c_char,
     monitored_extensions: *const std::ffi::c_char,
-    transport: i32,
-    media_security: i32,
-    enabled: i32,
-}
-#[repr(C)]
-struct NativeSoundSettings {
+    destination: *const std::ffi::c_char,
+    device: *const std::ffi::c_char,
     input_device: *const std::ffi::c_char,
     output_device: *const std::ffi::c_char,
     ring_device: *const std::ffi::c_char,
-    ringtone_enabled: i32,
-    ringtone_variant: i32,
-    ringtone_volume: u32,
 }
 
 unsafe extern "C" {
@@ -81,32 +83,7 @@ unsafe extern "C" {
     fn sip_engine_set_test_dns(handle: *mut c_void, ip: *const std::ffi::c_char, port: u16) -> i32;
     fn sip_engine_run(handle: *mut c_void) -> i32;
     fn sip_engine_reserve_call_generation(handle: *mut c_void) -> u64;
-    fn sip_engine_account(
-        handle: *mut c_void,
-        operation: i32,
-        account_id: u32,
-        config: *const NativeAccountConfig,
-    ) -> i32;
-    fn sip_engine_command(
-        handle: *mut c_void,
-        operation: i32,
-        account_id: u32,
-        generation: u64,
-        destination: *const std::ffi::c_char,
-        enabled: i32,
-    ) -> i32;
-    fn sip_engine_sound(
-        handle: *mut c_void,
-        restore: i32,
-        settings: *const NativeSoundSettings,
-    ) -> i32;
-    fn sip_engine_audio(
-        handle: *mut c_void,
-        operation: i32,
-        generation: u64,
-        device: *const std::ffi::c_char,
-    ) -> i32;
-    fn sip_engine_stop(handle: *mut c_void) -> i32;
+    fn sip_engine_request(handle: *mut c_void, request: *const NativeRequest) -> i32;
     fn sip_audio_devices(
         callback: extern "C" fn(
             i32,
@@ -328,13 +305,13 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         .flatten();
                     if kind == EV_DIAL_STARTED {
                         engine.snapshot.last_call_failure = None;
-                    }
-                    if kind == EV_DIAL_STARTED
-                        && let Some(number) = &number
-                    {
-                        engine
-                            .call_destinations
-                            .insert(call_generation, number.clone());
+                        let mut call = crate::dialogs::new_dialog(
+                            call_generation,
+                            account_id,
+                            CallState::Calling,
+                        );
+                        call.destination = number.clone();
+                        engine.pending_dial = Some(call);
                     }
                     engine.call_journal.start(
                         call_generation,
@@ -361,7 +338,11 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                 _ => {}
             }
             if kind == EV_DIAL_FAILED
-                && engine.call_destinations.remove(&call_generation).is_some()
+                && (owns_dialog
+                    || engine
+                        .pending_dial
+                        .as_ref()
+                        .is_some_and(|call| call.id == call_generation.to_string()))
                 && code != 0
             {
                 engine.snapshot.last_call_failure = Some(phone_core::CallFailure {
@@ -400,10 +381,6 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             }
             if kind == EV_DIAL_STARTED {
                 if matches!(engine.call_state(), CallState::Idle | CallState::Calling) {
-                    let mut call =
-                        crate::dialogs::new_dialog(call_generation, account_id, CallState::Calling);
-                    call.destination = engine.call_destinations.get(&call_generation).cloned();
-                    engine.pending_dial = Some(call);
                     engine.call_generation = call_generation;
                 }
                 return;
@@ -503,28 +480,12 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         }
                         EV_CONTROL_FAILED => {
                             call.hold_pending = false;
-                            call.last_error = Some(
-                                u16::try_from(code)
-                                    .ok()
-                                    .and_then(PhoneError::from_sip_status)
-                                    .unwrap_or_else(|| {
-                                        PhoneError::new(
-                                            ErrorCode::NativeFailure,
-                                            "Call control failed or timed out.",
-                                        )
-                                    }),
-                            );
+                            call.last_error =
+                                Some(sip_error(code, "Call control failed or timed out."));
                         }
                         EV_CONSULT_FAILED => {
-                            let mut error = u16::try_from(code)
-                                .ok()
-                                .and_then(PhoneError::from_sip_status)
-                                .unwrap_or_else(|| {
-                                    PhoneError::new(
-                                        ErrorCode::NativeFailure,
-                                        "The consultation could not be started.",
-                                    )
-                                });
+                            let mut error =
+                                sip_error(code, "The consultation could not be started.");
                             error.message = format!(
                                 "Consultation failed: {} The original call is retained.",
                                 error.message
@@ -540,10 +501,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         }
                         EV_RECOVERY_FAILED => {
                             call.hold_pending = false;
-                            let mut error = u16::try_from(code)
-                                .ok()
-                                .and_then(PhoneError::from_sip_status)
-                                .unwrap_or_else(|| PhoneError::new(ErrorCode::NativeFailure, ""));
+                            let mut error = sip_error(code, "");
                             error.message =
                                 "The SIP hold recovery failed; the uncertain call was ended."
                                     .into();
@@ -563,7 +521,10 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             } else {
                                 // A snapshot may be read before the following
                                 // legacy failure event; publish its error now.
-                                call.last_error = Some(transfer_error(code));
+                                call.last_error = Some(sip_error(
+                                    code,
+                                    "Call transfer failed without a SIP response.",
+                                ));
                                 phone_core::TransferState::Failed
                             };
                         }
@@ -751,7 +712,10 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         EV_DTMF_END => record_call_event(call, CallEventKind::DtmfEnd),
                         EV_TRANSFER_FAILED => {
                             record_call_event(call, CallEventKind::TransferFailed);
-                            call.last_error = Some(transfer_error(code));
+                            call.last_error = Some(sip_error(
+                                code,
+                                "Call transfer failed without a SIP response.",
+                            ));
                         }
                         EV_REDIRECT => {
                             if let Ok(status @ 300..=399) = u16::try_from(code) {
@@ -934,12 +898,8 @@ fn sanitize_caller_text(value: &str, limit: usize) -> Option<String> {
 pub(crate) struct NativeEngine {
     handle: Option<Handle>,
     thread: Option<JoinHandle<i32>>,
-    context: Option<NonNull<CallbackContext>>,
+    context: Option<Box<CallbackContext>>,
 }
-// Moving ownership does not change the boxed callback address. Public Engine
-// operations require exclusive access; the event loop accesses only synchronized state.
-unsafe impl Send for NativeEngine {}
-
 impl NativeEngine {
     pub(crate) fn start(
         snapshot: Arc<Mutex<EngineState>>,
@@ -991,86 +951,56 @@ impl NativeEngine {
             ));
         }
         let (ready, receiver) = mpsc::channel();
-        let context = NonNull::new(Box::into_raw(Box::new(CallbackContext {
+        let mut context = Box::new(CallbackContext {
             snapshot,
             changed,
             ready,
-        })))
-        .expect("Box is non-null");
+        });
         let raw = unsafe {
             sip_engine_create(
                 callback,
-                context.as_ptr().cast(),
+                (&mut *context as *mut CallbackContext).cast(),
                 i32::from(matches!(audio, AudioMode::TestTone)),
                 recording.as_ptr(),
             )
         };
         let Some(pointer) = NonNull::new(raw) else {
-            unsafe {
-                drop(Box::from_raw(context.as_ptr()));
-            }
             ENGINE_LEASE.store(false, Ordering::Release);
             return Err(native_error(-1));
+        };
+        let handle = Handle(pointer);
+        // From here, every failure uses the same joined shutdown and automatic Box drop.
+        let mut engine = Self {
+            handle: Some(handle),
+            thread: None,
+            context: Some(context),
         };
         unsafe {
             sip_engine_set_blf_callback(raw, blf_callback);
         }
         #[cfg(feature = "native-test-hooks")]
         if let Some(path) = test_ca {
-            let code = unsafe { sip_engine_set_test_ca(raw, path.as_ptr()) };
-            if code != 0 {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(code));
-            }
+            native_result(unsafe { sip_engine_set_test_ca(raw, path.as_ptr()) })?;
         }
         #[cfg(feature = "native-test-hooks")]
         if let Some((ip, port)) = test_dns {
-            let code = unsafe { sip_engine_set_test_dns(raw, ip.as_ptr(), port) };
-            if code != 0 {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(code));
-            }
+            native_result(unsafe { sip_engine_set_test_dns(raw, ip.as_ptr(), port) })?;
         }
         #[cfg(not(feature = "native-test-hooks"))]
         debug_assert!(test_ca.is_none() && test_dns.is_none());
-        let handle = Handle(pointer);
-        let thread = match thread::Builder::new()
-            .name("baresip-event-loop".into())
-            .spawn(move || handle.run())
-        {
-            Ok(thread) => thread,
-            Err(_) => {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(-1));
-            }
-        };
-        let engine = Self {
-            handle: Some(handle),
-            thread: Some(thread),
-            context: Some(context),
-        };
+        engine.thread = Some(
+            thread::Builder::new()
+                .name("baresip-event-loop".into())
+                .spawn(move || handle.run())
+                .map_err(|_| native_error(-1))?,
+        );
         receiver.recv().map_err(|_| native_error(-1))??;
         Ok(engine)
     }
 
     pub(crate) fn reserve_call_generation(&self) -> Result<u64, PhoneError> {
-        let handle = self
-            .handle
-            .ok_or_else(|| PhoneError::new(ErrorCode::EngineUnavailable, "Engine is stopped."))?;
         // The same native queue lock serializes reservations and incoming tokens.
-        Ok(unsafe { sip_engine_reserve_call_generation(handle.0.as_ptr()) })
+        Ok(unsafe { sip_engine_reserve_call_generation(self.handle()?) })
     }
 
     fn handle(&self) -> Result<*mut c_void, PhoneError> {
@@ -1079,26 +1009,27 @@ impl NativeEngine {
             .ok_or_else(|| PhoneError::new(ErrorCode::EngineUnavailable, "Engine is stopped."))
     }
 
+    fn submit(&self, request: NativeRequest) -> Result<(), PhoneError> {
+        // Native copies borrowed strings before returning, even on queue failure.
+        native_result(unsafe { sip_engine_request(self.handle()?, &request) })
+    }
+
     pub(crate) fn request(
         &self,
         operation: i32,
         account_id: u32,
         destination: Option<&str>,
-        generation: u64,
+        call_generation: u64,
         enabled: bool,
     ) -> Result<(), PhoneError> {
-        let handle = self.handle()?;
         let destination = cstring(destination.unwrap_or(""))?;
-        // C synchronously copies the destination into its owned bounded queue.
-        native_result(unsafe {
-            sip_engine_command(
-                handle,
-                operation,
-                account_id,
-                generation,
-                destination.as_ptr(),
-                i32::from(enabled),
-            )
+        self.submit(NativeRequest {
+            operation,
+            account_id,
+            call_generation,
+            enabled: i32::from(enabled),
+            destination: destination.as_ptr(),
+            ..Default::default()
         })
     }
 
@@ -1109,11 +1040,11 @@ impl NativeEngine {
         config: Option<&AccountConfig>,
         enabled: bool,
     ) -> Result<(), PhoneError> {
-        let handle = self.handle()?;
         let Some(config) = config else {
-            // Only disabling an existing native identity accepts no configuration.
-            return native_result(unsafe {
-                sip_engine_account(handle, operation, id, std::ptr::null())
+            return self.submit(NativeRequest {
+                operation,
+                account_id: id,
+                ..Default::default()
             });
         };
         let registrar = cstring(&config.registrar)?;
@@ -1129,7 +1060,9 @@ impl NativeEngine {
                 .collect::<Vec<_>>()
                 .join("\n"),
         )?;
-        let native = NativeAccountConfig {
+        self.submit(NativeRequest {
+            operation,
+            account_id: id,
             registrar: registrar.as_ptr(),
             username: username.as_ptr(),
             password: password.as_ptr(),
@@ -1145,9 +1078,8 @@ impl NativeEngine {
                 config.media_security == phone_core::MediaSecurityPolicy::Required,
             ),
             enabled: i32::from(enabled),
-        };
-        // C copies every field before returning; no pointer escapes this stack frame.
-        native_result(unsafe { sip_engine_account(handle, operation, id, &native) })
+            ..Default::default()
+        })
     }
 
     pub(crate) fn sound_request(
@@ -1155,23 +1087,23 @@ impl NativeEngine {
         restore: bool,
         settings: &SoundSettings,
     ) -> Result<(), PhoneError> {
-        let handle = self.handle()?;
         let input = cstring(&settings.input_device)?;
         let output = cstring(&settings.output_device)?;
         let ring = cstring(&settings.ring_device)?;
-        let native = NativeSoundSettings {
+        self.submit(NativeRequest {
+            operation: if restore { OP_SOUND_RESTORE } else { OP_SOUND },
             input_device: input.as_ptr(),
             output_device: output.as_ptr(),
             ring_device: ring.as_ptr(),
-            ringtone_enabled: i32::from(settings.ringtone_enabled),
+            enabled: i32::from(settings.ringtone_enabled),
             ringtone_variant: match settings.ringtone {
                 phone_core::Ringtone::Classic => 0,
                 phone_core::Ringtone::Soft => 1,
                 phone_core::Ringtone::Short => 2,
             },
             ringtone_volume: u32::from(settings.ringtone_volume),
-        };
-        native_result(unsafe { sip_engine_sound(handle, i32::from(restore), &native) })
+            ..Default::default()
+        })
     }
 
     pub(crate) fn audio_test_request(
@@ -1180,20 +1112,23 @@ impl NativeEngine {
         id: u64,
         device: &str,
     ) -> Result<(), PhoneError> {
-        let handle = self.handle()?;
         let device = cstring(device)?;
-        native_result(unsafe { sip_engine_audio(handle, operation, id, device.as_ptr()) })
-    }
-
-    pub(crate) fn preview_request(&self, operation: i32, device: &str) -> Result<(), PhoneError> {
-        self.audio_test_request(operation, 0, device)
+        self.submit(NativeRequest {
+            operation,
+            call_generation: id,
+            device: device.as_ptr(),
+            ..Default::default()
+        })
     }
 
     pub(crate) fn shutdown(&mut self) -> Result<(), PhoneError> {
         if self.handle.is_none() {
             return Ok(());
         }
-        let request_result = native_result(unsafe { sip_engine_stop(self.handle()?.cast()) });
+        let request_result = self.submit(NativeRequest {
+            operation: OP_STOP,
+            ..Default::default()
+        });
         let result = self
             .thread
             .take()
@@ -1205,11 +1140,8 @@ impl NativeEngine {
                 sip_engine_destroy(handle.0.as_ptr());
             }
         }
-        if let Some(context) = self.context.take() {
-            unsafe {
-                drop(Box::from_raw(context.as_ptr()));
-            }
-        }
+        // C can no longer call the context after the event thread has joined.
+        drop(self.context.take());
         ENGINE_LEASE.store(false, Ordering::Release);
         match result? {
             Some(code) if code != 0 => Err(native_error(code)),
@@ -1236,16 +1168,11 @@ fn cstring(input: &str) -> Result<CString, PhoneError> {
     CString::new(input)
         .map_err(|_| PhoneError::new(ErrorCode::InvalidInput, "NUL bytes are not allowed."))
 }
-fn transfer_error(code: i32) -> PhoneError {
+fn sip_error(code: i32, fallback: &str) -> PhoneError {
     u16::try_from(code)
         .ok()
         .and_then(PhoneError::from_sip_status)
-        .unwrap_or_else(|| {
-            PhoneError::new(
-                ErrorCode::NativeFailure,
-                "Call transfer failed without a SIP response.",
-            )
-        })
+        .unwrap_or_else(|| PhoneError::new(ErrorCode::NativeFailure, fallback))
 }
 
 fn native_error(code: i32) -> PhoneError {

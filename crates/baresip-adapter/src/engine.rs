@@ -28,8 +28,6 @@ pub(crate) struct EngineState {
     pub(crate) sound_result: Option<Result<(), PhoneError>>,
     #[cfg(feature = "native")]
     pub(crate) local_endings: std::collections::BTreeSet<u64>,
-    #[cfg(feature = "native")]
-    pub(crate) call_destinations: BTreeMap<u64, String>,
 }
 
 impl EngineState {
@@ -184,7 +182,7 @@ impl Engine {
         self.reserve_sound_operation()?;
         #[cfg(feature = "native")]
         {
-            self.native.preview_request(OP_PREVIEW, device)?;
+            self.native.audio_test_request(OP_PREVIEW, 0, device)?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]
@@ -200,7 +198,7 @@ impl Engine {
             .sound_result = None;
         #[cfg(feature = "native")]
         {
-            self.native.preview_request(OP_PREVIEW_STOP, "")?;
+            self.native.audio_test_request(OP_PREVIEW_STOP, 0, "")?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]
@@ -309,9 +307,16 @@ impl Engine {
     }
     #[cfg(feature = "native")]
     fn wait_sound_operation(&self) -> Result<(), PhoneError> {
+        self.wait_for_result(|state| state.sound_result.take())
+    }
+
+    fn wait_for_result(
+        &self,
+        mut result: impl FnMut(&mut EngineState) -> Option<Result<(), PhoneError>>,
+    ) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
         loop {
-            if let Some(result) = state.sound_result.take() {
+            if let Some(result) = result(&mut state) {
                 return result;
             }
             if state.stopped {
@@ -556,37 +561,21 @@ impl Engine {
     /// Wait for the native queue to apply or reject a configuration, not for SIP registration.
     /// Native shutdown rejects pending operations; a delayed operation is never abandoned.
     pub fn wait_account_update(&self, id: u32) -> Result<(), PhoneError> {
-        let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        loop {
-            if let Some(result) = state.account_results.remove(&id) {
-                return result;
-            }
-            if state.stopped {
-                return Err(state_error());
-            }
-            state = self.changed.wait(state).map_err(|_| state_error())?;
-        }
+        self.wait_for_result(|state| state.account_results.remove(&id))
     }
 
     /// Wait for native deletion or rejection, so durable storage cannot race a live UA.
     pub fn wait_account_removed(&self, id: u32) -> Result<(), PhoneError> {
-        let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        loop {
-            match state.snapshot.accounts.iter().find(|a| a.id == id) {
-                None => return Ok(()),
-                Some(account) if !account.removing => {
-                    return Err(PhoneError::new(
-                        ErrorCode::Busy,
-                        "An incoming call prevented account removal.",
-                    ));
-                }
-                _ => {}
-            }
-            if state.stopped {
-                return Err(state_error());
-            }
-            state = self.changed.wait(state).map_err(|_| state_error())?;
-        }
+        self.wait_for_result(
+            |state| match state.snapshot.accounts.iter().find(|a| a.id == id) {
+                None => Some(Ok(())),
+                Some(account) if !account.removing => Some(Err(PhoneError::new(
+                    ErrorCode::Busy,
+                    "An incoming call prevented account removal.",
+                ))),
+                _ => None,
+            },
+        )
     }
 
     /// Restore non-secret metadata when a saved password could not be read.
@@ -736,14 +725,7 @@ impl Engine {
             .ok_or_else(state_error)?;
         call.state = CallState::Answering;
         if let Err(error) = self.request(OP_ANSWER, 0, None, generation, false) {
-            if let Some(call) = state
-                .snapshot
-                .calls
-                .iter_mut()
-                .find(|call| call.id == generation.to_string())
-            {
-                call.state = CallState::Incoming;
-            }
+            call.state = CallState::Incoming;
             return Err(error);
         }
         Ok(())
@@ -879,17 +861,18 @@ impl Engine {
         enabled: bool,
     ) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        let call = state
+        let index = state
             .snapshot
             .calls
             .iter()
-            .find(|call| call.id == call_id)
+            .position(|call| call.id == call_id)
             .ok_or_else(|| {
                 PhoneError::new(
                     ErrorCode::InvalidState,
                     "The call changed before this action was submitted.",
                 )
             })?;
+        let call = &state.snapshot.calls[index];
         if operation != OP_MUTE
             && state.snapshot.calls.iter().any(|call| {
                 call.hold_pending || call.transfer == phone_core::TransferState::Pending
@@ -952,14 +935,7 @@ impl Engine {
         }
         let generation = call.id.parse().map_err(|_| state_error())?;
         self.request(operation, call.account_id, destination, generation, enabled)?;
-        if let Some(call) = state
-            .snapshot
-            .calls
-            .iter_mut()
-            .find(|call| call.id == call_id)
-        {
-            call.last_error = None;
-        }
+        state.snapshot.calls[index].last_error = None;
         if state.selected_dialog().map(|call| call.id.as_str()) == Some(call_id) {
             state.snapshot.last_error = None;
         }

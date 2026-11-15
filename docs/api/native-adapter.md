@@ -7,19 +7,24 @@ Cargo generates private Rust constants in OUT_DIR. Existing public Rust methods,
 IPC commands, error classifications and generated TypeScript DTOs are unchanged,
 including `configure_account`.
 
-Every request requires a live engine handle. Strings are borrowed NUL-terminated
-UTF-8, copied into queue-owned memory before return; null optional strings mean
-empty. No pointer is retained from Rust. C wipes the owned account password before
-freeing its request on execution, rejection, enqueue failure or shutdown. Callback
+`sip_engine_request(handle, request)` is the single request entry point. Both
+arguments are required. The named `sip_request` fields in bridge.h are mirrored
+by repr(C) NativeRequest in Rust. Unused numeric fields are zero; unused string
+fields are null. There is no per-family payload object or string-encoded flag.
+
+Strings are borrowed NUL-terminated UTF-8. Before enqueueing, C copies the request
+and all populated strings into one owned allocation. Null optional strings mean
+empty/default; no pointer is retained from Rust. C wipes the copied password
+before freeing that allocation on execution, enqueue failure or shutdown. Callback
 strings remain borrowed only for the synchronous callback; Rust copies them.
 
-| Entry point          | Required inputs                                                                                                      | Optional inputs and meaning                                                                                                                                                                                                                                                                                |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sip_engine_account` | operation (`OP_ACCOUNT`, `OP_ENABLE`, `OP_DISABLE`), account ID; config for account creation/replacement or enabling | Only disable accepts null config. Config has registrar, username, password, optional auth username/proxy/monitored numeric extensions, transport (0 UDP, 1 TCP, 2 TLS), media policy (0 disabled, 1 required), enabled (0/1). Null optional strings are empty. Extensions retain bounded newline encoding. |
-| `sip_engine_command` | operation (dial, answer, hangup, reject, remove or call control), account ID, generation, enabled (0/1)              | Destination is required for dial, transfer, consultation and DTMF; otherwise null/empty. Enabled is the typed mute/hold flag, not a destination string. Generation identifies the owning call; unused account/generation fields are zero.                                                                  |
-| `sip_engine_sound`   | restore (zero validates current inventory, nonzero restores saved routing), settings                                 | Empty/null input, output or ring device selects default. Settings carry enabled (0/1), ringtone variant (0–2) and volume (0–100) as numeric fields.                                                                                                                                                        |
-| `sip_engine_audio`   | preview/test operation, generation for test start/stop                                                               | Null/empty device selects default; preview and preview-stop use generation zero.                                                                                                                                                                                                                           |
-| `sip_engine_stop`    | engine handle                                                                                                        | No payload; flags shutdown under the existing queue mutex without allocating or enqueueing.                                                                                                                                                                                                                |
+| Operation                                           | Required fields                                               | Optional fields and meaning                                                                                                                                                                                                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account create/replace, enable                      | operation, account_id, registrar, username, password          | auth_username defaults to username; outbound_proxy defaults to registrar; monitored_extensions is a bounded newline-separated numeric list. Transport is 0 UDP, 1 TCP or 2 TLS; media_security is 0 disabled or 1 required; enabled is 0/1. Disable needs only operation and account_id. |
+| Dial, answer, hangup, reject, remove, call controls | operation, owning call_generation/account_id where applicable | Destination is required for dial, transfer, consultation and DTMF. Enabled is the numeric 0/1 mute/hold flag. Unused identity fields are zero.                                                                                                                                           |
+| Sound settings                                      | OP_SOUND or OP_SOUND_RESTORE                                  | input_device, output_device and ring_device default when null/empty. Enabled is 0/1, ringtone_variant is 0–2 and ringtone_volume is 0–100. Restore retains saved routing without requiring currently present hardware.                                                                   |
+| Audio diagnostic or preview                         | operation; call_generation for test start/stop                | device defaults when null/empty. Preview and preview-stop use generation zero.                                                                                                                                                                                                           |
+| Stop                                                | OP_STOP                                                       | Flags shutdown under the existing queue mutex before copying, allocating or enqueueing; queue saturation cannot prevent stop.                                                                                                                                                            |
 
 The safe Engine API performs existing account, device, number, call-token and
 state validation before these private calls. Native execution rechecks call
@@ -28,7 +33,7 @@ commands retain dedicated upstream authentication setters and TLS/SRTP policy;
 there is no credential-bearing account URI or second audio path.
 
 All calls return zero for acceptance or an errno for synchronous rejection:
-`EINVAL` for the wrong operation family or invalid structural payload,
+`EINVAL` for an unknown operation, invalid boolean flag, missing required account/destination fields or invalid monitored targets,
 `ENOMEM` for copying/allocation failure, `ENOTCONN` for stopped/stopping engines,
 and `EBUSY` at the existing sixteen-request queue bound. Sound variant/volume,
 inventory and call/account state are checked on the native thread and reported

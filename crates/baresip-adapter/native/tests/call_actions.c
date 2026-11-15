@@ -37,18 +37,19 @@ static void observed(const struct sip_event *event, void *arg) {
 static void execute(struct engine *engine, int operation) {
     struct request *request = calloc(1, sizeof(*request));
     assert(request);
-    request->operation = operation;
-    if (operation == OP_DISABLE || operation == OP_ENABLE) request->account_id = 77;
-    request->call_generation = engine->current->generation;
+    request->command.operation = operation;
+    if (operation == OP_DISABLE || operation == OP_ENABLE) request->command.account_id = 77;
+    request->command.call_generation = engine->current->generation;
     queue_handler(operation, request, engine);
 }
 
 static unsigned payloads;
 static void inspect_payload(int id, void *data, void *arg) {
     struct engine *engine = arg;
-    struct request *r = data;
+    struct request *owned = data;
+    const struct sip_request *r = &owned->command;
     assert(id == r->operation);
-    remove_pending(engine, r);
+    remove_pending(engine, owned);
     switch (payloads++) {
     case 0:
         assert(id == OP_ACCOUNT && r->account_id == 77 && !r->enabled);
@@ -74,34 +75,42 @@ static void inspect_payload(int id, void *data, void *arg) {
     default:
         assert(id == OP_HANGUP);
     }
-    free_request(r);
+    free_request(owned);
     if (payloads == 16) re_cancel();
 }
 
 static void request_payloads(void) {
     struct engine engine = {0};
     char password[] = "fixture-password", input[] = "mic";
-    const struct sip_account_config account = {
-        "pbx.test", "100", password, "auth", "proxy.test", "101\n102", 2, 1, 0
+    const struct sip_request account = {
+        .operation=OP_ACCOUNT, .account_id=77, .registrar="pbx.test", .username="100",
+        .password=password, .auth_username="auth", .outbound_proxy="proxy.test",
+        .monitored_extensions="101\n102", .transport=2, .media_security=1
     };
-    const struct sip_sound_settings sound = { input, "speaker", "ring", 1, 2, 37 };
+    const struct sip_request sound = { .operation=OP_SOUND_RESTORE,
+        .input_device=input, .output_device="speaker", .ring_device="ring", .enabled=1,
+        .ringtone_variant=2, .ringtone_volume=37 };
+    const struct sip_request hold = { .operation=OP_HOLD, .account_id=77, .call_generation=42, .enabled=1 };
+    const struct sip_request test = { .operation=OP_TEST_MIC, .call_generation=43, .device=input };
+    const struct sip_request hangup = { .operation=OP_HANGUP, .account_id=77, .call_generation=42 };
+    const struct sip_request stop = { .operation=OP_STOP };
     LOCK_INIT(&engine.lock);
     assert(!libre_init());
     assert(!mqueue_alloc(&engine.queue, inspect_payload, &engine));
     engine.running = true;
-    assert(!sip_engine_account(&engine, OP_ACCOUNT, 77, &account));
-    assert(!sip_engine_sound(&engine, 1, &sound));
-    assert(!sip_engine_command(&engine, OP_HOLD, 77, 42, NULL, 1));
-    assert(!sip_engine_audio(&engine, OP_TEST_MIC, 43, input));
+    assert(!sip_engine_request(&engine, &account));
+    assert(!sip_engine_request(&engine, &sound));
+    assert(!sip_engine_request(&engine, &hold));
+    assert(!sip_engine_request(&engine, &test));
     /* All inputs are borrowed only until return, including the secret. */
     memset(password, 'x', sizeof(password) - 1);
     input[0] = 'x';
     for (unsigned i = 4; i < 16; ++i)
-        assert(!sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0));
-    assert(sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0) == EBUSY);
+        assert(!sip_engine_request(&engine, &hangup));
+    assert(sip_engine_request(&engine, &hangup) == EBUSY);
     /* Stop must succeed even with a saturated queue, without an allocation. */
-    assert(!sip_engine_stop(&engine) && engine.stop_requested);
-    assert(sip_engine_command(&engine, OP_HANGUP, 77, 42, NULL, 0) == ENOTCONN);
+    assert(!sip_engine_request(&engine, &stop) && engine.stop_requested);
+    assert(sip_engine_request(&engine, &hangup) == ENOTCONN);
     assert(!re_main(NULL));
     assert(payloads == 16 && !engine.pending);
     mem_deref(engine.queue);
@@ -142,8 +151,8 @@ int main(void) {
     engine.current->ua = (struct ua *)&engine;
     struct request *dial = calloc(1, sizeof(*dial));
     assert(dial);
-    dial->operation = OP_DIAL;
-    dial->call_generation = 43;
+    dial->command.operation = OP_DIAL;
+    dial->command.call_generation = 43;
     queue_handler(OP_DIAL, dial, &engine);
     assert(failed_dials == 1 && failed_dial_generation == 43);
     assert(engine.current->call && engine.current->generation == 42);
