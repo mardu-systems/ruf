@@ -1,0 +1,264 @@
+diff --git a/modules/pulse/pulse.c b/modules/pulse/pulse.c
+--- a/modules/pulse/pulse.c
++++ b/modules/pulse/pulse.c
+@@ -13,6 +13,7 @@
+ #include <baresip.h>
+ 
+ #include "pulse.h"
++#include <stdatomic.h>
+ 
+ 
+ /**
+@@ -40,6 +41,10 @@
+ 
+ 
+ static struct pa pa;
++static atomic_int terminal_error;
++
++int pulse_error(void) { return atomic_load(&terminal_error); }
++void pulse_failed(void) { atomic_store(&terminal_error, ENODEV); }
+ 
+ 
+ static int paconn_start(struct paconn_st **ppaconn);
+@@ -91,6 +96,7 @@
+ 
+ 	switch (pa_context_get_state(context)) {
+ 		case PA_CONTEXT_FAILED:
++			pulse_failed();
+ 			pa_threaded_mainloop_signal(c->mainloop, 0);
+ 			mqueue_push(pa.q, 0, NULL);
+ 			break;
+@@ -183,16 +189,29 @@
+ 		goto out;
+ 	}
+ 
++	*ppaconn = c;
+ 	pa_threaded_mainloop_lock(c->mainloop);
+ 	if (pa_threaded_mainloop_start(c->mainloop) < 0)
+ 		err = EINVAL;
+ 
++	uint64_t deadline = tmr_jiffies() + 3000;
++	while (!err && pa_context_get_state(c->context) != PA_CONTEXT_READY) {
++		if (!PA_CONTEXT_IS_GOOD(pa_context_get_state(c->context))) err = ENODEV;
++		else if (tmr_jiffies() >= deadline) err = ETIMEDOUT;
++		else {
++			pa_threaded_mainloop_unlock(c->mainloop);
++			sys_msleep(5);
++			pa_threaded_mainloop_lock(c->mainloop);
++		}
++	}
+ 	pa_threaded_mainloop_unlock(c->mainloop);
+ 	info ("pulse: initialized (%m)\n", err);
+ 
+   out:
+-	if (err)
++	if (err) {
++		*ppaconn = NULL;
+ 		mem_deref(c);
++	}
+ 	else
+ 		*ppaconn = c;
+ 
+@@ -264,15 +283,18 @@
+ 	int err;
+ 
+ 	memset(&pa, 0, sizeof(pa));
+-	err = pa_start();
+-	if (err)
+-		return err;
+-
++	atomic_store(&terminal_error, 0);
+ 	err  = auplay_register(&auplay, baresip_auplayl(),
+ 			       "pulse", pulse_player_alloc);
+ 	err |= ausrc_register(&ausrc, baresip_ausrcl(),
+ 			      "pulse", pulse_recorder_alloc);
+-
++	if (!err) err = pa_start();
++	if (err) {
++		pa.paconn = mem_deref(pa.paconn);
++		pa.q = mem_deref(pa.q);
++		auplay = mem_deref(auplay);
++		ausrc = mem_deref(ausrc);
++	}
+ 	return err;
+ }
+ 
+diff --git a/modules/pulse/pulse.h b/modules/pulse/pulse.h
+--- a/modules/pulse/pulse.h
++++ b/modules/pulse/pulse.h
+@@ -27,6 +27,7 @@
+ 	char sname[256];
+ 	bool shutdown;
+ 
++	struct paconn_st *connection;
+ 	pa_stream *stream;
+ 	pa_sample_spec ss;
+ 	pa_buffer_attr attr;
+@@ -68,3 +69,7 @@
+ int pastream_start(struct pastream_st *st, void *arg);
+ 
+ 
++
++/* Terminal worker failure is observed on the SIP event loop. */
++int pulse_error(void);
++void pulse_failed(void);
+diff --git a/modules/pulse/pastream.c b/modules/pulse/pastream.c
+--- a/modules/pulse/pastream.c
++++ b/modules/pulse/pastream.c
+@@ -25,46 +25,10 @@
+ }
+ 
+ 
+-static void success_cb(pa_stream *s, int success, void *arg)
+-{
+-	(void)s;
+-	(void)success;
+-	(void)arg;
+-
+-	struct paconn_st *c = paconn_get();
+-
+-	if (c)
+-		pa_threaded_mainloop_signal(c->mainloop, 0);
+-}
+-
+-
+-static int stream_flush(struct pastream_st *st)
+-{
+-	struct paconn_st *c = paconn_get();
+-	pa_operation *op;
+-
+-	if (!st->stream)
+-		return EINVAL;
+-
+-	if (pa_stream_get_state(st->stream) != PA_STREAM_READY)
+-		return 0;
+-
+-	op = pa_stream_flush(st->stream, success_cb, st);
+-	if (!op)
+-		return EINVAL;
+-
+-	while (c && pa_operation_get_state(op) == PA_OPERATION_RUNNING)
+-		pa_threaded_mainloop_wait(c->mainloop);
+-
+-	pa_operation_unref(op);
+-	return 0;
+-}
+-
+-
+ static void pastream_destructor(void *arg)
+ {
+ 	struct pastream_st *st = arg;
+-	struct paconn_st *c = paconn_get();
++	struct paconn_st *c = st->connection;
+ 
+ 	if (!c)
+ 		return;
+@@ -77,8 +41,7 @@
+ 		pa_stream_set_underflow_callback(st->stream, NULL, NULL);
+ 		pa_stream_set_overflow_callback(st->stream, NULL, NULL);
+ 		pa_stream_set_latency_update_callback(st->stream, NULL, NULL);
+-		if (st->direction == PA_STREAM_PLAYBACK)
+-			stream_flush(st);
++		pa_stream_set_state_callback(st->stream, NULL, NULL);
+ 
+ 		pa_stream_disconnect(st->stream);
+ 		pa_stream_unref(st->stream);
+@@ -86,6 +49,7 @@
+ 	}
+ 
+ 	pa_threaded_mainloop_unlock(c->mainloop);
++	st->connection = mem_deref(st->connection);
+ 
+ 	info("pulse: %s [overrun=%zu underrun=%zu]\n",
+ 	     st->sname, st->stats.overrun, st->stats.underrun);
+@@ -129,9 +93,9 @@
+ 
+ static void stream_state_cb(pa_stream *s, void *arg)
+ {
+-	struct paconn_st *c = paconn_get();
+-	(void)s;
+-	(void)arg;
++	struct pastream_st *st = arg;
++	struct paconn_st *c = st->connection;
++	if (!st->shutdown && pa_stream_get_state(s) == PA_STREAM_FAILED) pulse_failed();
+ 
+ 	if (c)
+ 		pa_threaded_mainloop_signal(c->mainloop, 0);
+@@ -148,7 +112,7 @@
+  */
+ int pastream_start(struct pastream_st* st, void *arg)
+ {
+-	struct paconn_st *c = paconn_get();
++	struct paconn_st *c = st->connection;
+ 	int pa_err = 0;
+ 	int err = 0;
+ 
+@@ -208,6 +172,16 @@
+ 		err = EINVAL;
+ 	}
+ 
++	uint64_t deadline = tmr_jiffies() + 3000;
++	while (!err && !pa_err && st->stream && pa_stream_get_state(st->stream) != PA_STREAM_READY) {
++		if (!PA_STREAM_IS_GOOD(pa_stream_get_state(st->stream))) err = ENODEV;
++		else if (tmr_jiffies() >= deadline) err = ETIMEDOUT;
++		else {
++			pa_threaded_mainloop_unlock(c->mainloop);
++			sys_msleep(5);
++			pa_threaded_mainloop_lock(c->mainloop);
++		}
++	}
+ out:
+ 	if (st && pa_err) {
+ 		warning("pulse: stream %s stream error %d\n", st->sname,
+@@ -248,6 +222,9 @@
+ 	if (!st)
+ 		return ENOMEM;
+ 
++	st->connection = mem_ref(paconn_get());
++	if (!st->connection) { mem_deref(st); return ENODEV; }
++
+ 	st->ss.format   = aufmt_to_pulse_format(fmt);
+ 	st->ss.channels = ch;
+ 	st->ss.rate     = srate;
+diff --git a/modules/pulse/player.c b/modules/pulse/player.c
+--- a/modules/pulse/player.c
++++ b/modules/pulse/player.c
+@@ -94,7 +94,7 @@
+ 	int err;
+ 	(void)context;
+ 
+-	if (eol > 0)
++	if (eol || !l)
+ 		return;
+ 
+ 	err = mediadev_add(dev_list, l->name);
+@@ -130,7 +130,7 @@
+ void stream_write_cb(pa_stream *s, size_t len, void *arg)
+ {
+ 	struct auplay_st *st = arg;
+-	struct paconn_st *c  = paconn_get();
++	struct paconn_st *c  = st->b->connection;
+ 	struct auframe af;
+ 	void *sampv;
+ 	int pa_err = 0;
+diff --git a/modules/pulse/recorder.c b/modules/pulse/recorder.c
+--- a/modules/pulse/recorder.c
++++ b/modules/pulse/recorder.c
+@@ -109,7 +109,7 @@
+ 	int err;
+ 	(void)context;
+ 
+-	if (eol > 0)
++	if (eol || !l)
+ 		return;
+ 
+ 	if (strstr(l->name, "output"))
+@@ -148,7 +148,7 @@
+ void stream_read_cb(pa_stream *s, size_t len, void *arg)
+ {
+ 	struct ausrc_st *st = arg;
+-	struct paconn_st *c = paconn_get();
++	struct paconn_st *c = st->b->connection;
+ 	struct auframe af;
+ 
+ 	int pa_err = 0;

@@ -12,6 +12,8 @@
   import PermissionStatus from "./PermissionStatus.svelte";
   const isWindows =
     typeof navigator !== "undefined" && /Win/.test(navigator.platform);
+  const isLinux =
+    typeof navigator !== "undefined" && /Linux/.test(navigator.platform);
   let status = $state<MicrophonePermission | null>(null),
     permissionError = $state<MessageValue | null>(null),
     actionError = $state<MessageValue | null>(null);
@@ -101,7 +103,7 @@
   error={$text(permissionError)}
   requestLabel={$t("settings.allow_microphone")}
   unsupportedLabel={message(
-    isWindows
+    isWindows || isLinux
       ? "settings.microphone_query_unsupported"
       : "settings.unavailable",
   )}
@@ -118,6 +120,9 @@
 </p>
 {#if isWindows}<p class="settings-footnote">
     {$t("settings.windows_microphone_help")}
+  </p>{/if}
+{#if isLinux}<p class="settings-footnote">
+    {$t("settings.linux_microphone_help")}
   </p>{/if}
 <ContactsSettings embedded />
 <h2 class="settings-group sound-group">{$t("settings.local_data")}</h2>

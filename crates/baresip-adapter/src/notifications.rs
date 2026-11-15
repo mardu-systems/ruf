@@ -2,6 +2,8 @@
 use phone_core::{ErrorCode, PhoneError};
 use std::sync::mpsc::Sender;
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod macos;
@@ -38,6 +40,8 @@ pub enum NotificationPermission {
 /// Initialize the per-process native action receiver. No authorization prompt is shown.
 /// `register_activation` permits Windows installed-release activation registration;
 /// development builds must pass false. Call once during desktop setup.
+/// Linux binds actions to the current freedesktop daemon's unique D-Bus owner;
+/// missing session/daemon services return `NativeFailure`. Restart after daemon replacement.
 pub fn init_call_notifications(
     sender: Sender<CallNotificationAction>,
     app_id: &str,
@@ -51,7 +55,12 @@ pub fn init_call_notifications(
     {
         windows::init(sender, app_id, register_activation)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = register_activation;
+        linux::init(sender, app_id)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         let _ = (sender, app_id, register_activation);
         Ok(())
@@ -60,6 +69,8 @@ pub fn init_call_notifications(
 
 /// Query authorization, optionally requesting it after an explicit foreground user action.
 /// May wait for the OS response; call from a blocking worker, never the UI thread.
+/// Linux never prompts: Authorized means an available daemon supports actions,
+/// not proof of per-app permission or visible delivery. D-Bus calls time out after three seconds.
 pub fn call_notification_permission(request: bool) -> Result<NotificationPermission, PhoneError> {
     #[cfg(target_os = "macos")]
     {
@@ -69,7 +80,12 @@ pub fn call_notification_permission(request: bool) -> Result<NotificationPermiss
     {
         windows::permission(request)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = request;
+        linux::permission()
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         let _ = request;
         Ok(NotificationPermission::Unsupported)
@@ -106,7 +122,11 @@ pub fn show_call_notification(
     {
         windows::show(token, title, body, answer, reject)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::show(token, title, body, answer, reject)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         Err(PhoneError::new(
             ErrorCode::EngineUnavailable,
@@ -124,6 +144,7 @@ pub fn show_call_notification(
 /// worker and a separate notification group, without touching the live-call map.
 /// Returns `NativeFailure` on denial, timeout or service failure and
 /// `EngineUnavailable` on unsupported platforms or Windows launch contexts.
+/// Linux uses a silent, action-free freedesktop banner with no call-token binding.
 pub fn show_test_notification(title: &str, body: &str) -> Result<(), PhoneError> {
     for (text, bound) in [(title, 512), (body, 1024)] {
         if text.is_empty()
@@ -143,7 +164,11 @@ pub fn show_test_notification(title: &str, body: &str) -> Result<(), PhoneError>
     {
         windows::show_test(title, body)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::test(title, body)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         Err(PhoneError::new(
             ErrorCode::EngineUnavailable,
@@ -163,7 +188,11 @@ pub fn dismiss_call_notification(token: &str) -> Result<(), PhoneError> {
     {
         windows::dismiss(token)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::dismiss(token)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         Ok(())
     }

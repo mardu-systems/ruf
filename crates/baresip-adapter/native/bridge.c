@@ -263,12 +263,24 @@ static const char *platform_audio(void) {
     return "coreaudio";
 #elif defined(WIN32)
     return "wasapi";
+#elif defined(__linux__)
+    return "pulse";
 #else
     return NULL;
 #endif
 }
+#ifdef __linux__
+/* Patched upstream worker status; callbacks never tear down their own worker. */
+extern int pulse_error(void);
+#endif
 static int ensure_platform_audio(struct engine *e) {
-    if (e->platform_audio_loaded) return 0;
+    if (e->platform_audio_loaded) {
+#ifdef __linux__
+        return pulse_error();
+#else
+        return 0;
+#endif
+    }
     const char *module = platform_audio();
     if (!module) return ENOTSUP;
     int error = module_load("", module);
@@ -430,12 +442,17 @@ static void remove_pending(struct engine *e, struct request *r) {
 /* Query backend atomics on the native loop. A worker must never invoke a call
  * error callback that destroys and joins that same worker. */
 static void check_audio_players(struct engine *e) {
-    int error = play_error(e->test_player);
+#ifdef __linux__
+    const int backend_error = e->platform_audio_loaded ? pulse_error() : 0;
+#else
+    const int backend_error = 0;
+#endif
+    int error = backend_error ? backend_error : play_error(e->test_player);
     if (error && e->test_id) {
         emit_test(e, EV_TEST_FAILED, error, e->test_id);
         stop_audio_test(e);
     }
-    error = play_error(e->ring);
+    error = e->ring && backend_error ? backend_error : play_error(e->ring);
     if (error) {
         stop_ring(e);
         emit(e, EV_ERROR, error);
@@ -443,7 +460,7 @@ static void check_audio_players(struct engine *e) {
     for (size_t i = 0; i < 2; ++i) {
         struct native_dialog *dialog = &e->dialogs[i];
         if (!dialog->call || dialog->playback_failed) continue;
-        error = audio_play_error(call_audio(dialog->call));
+        error = backend_error ? backend_error : audio_play_error(call_audio(dialog->call));
         if (!error) continue;
         dialog->playback_failed = true;
         e->current = dialog;
@@ -983,6 +1000,9 @@ int sip_engine_run(void *handle) {
 #elif defined(WIN32)
         str_ncpy(audio->src_mod, "wasapi", sizeof(audio->src_mod));
         str_ncpy(audio->play_mod, "wasapi", sizeof(audio->play_mod));
+#elif defined(__linux__)
+        str_ncpy(audio->src_mod, "pulse", sizeof(audio->src_mod));
+        str_ncpy(audio->play_mod, "pulse", sizeof(audio->play_mod));
 #else
         error = ENOTSUP;
 #endif

@@ -892,5 +892,8 @@
   "validation.outboundProxy": "Gib einen Proxy als Serveradresse an, optional mit :Port. Ohne sip:, Parameter oder Pfad.",
   "validation.password": "Gib dein SIP-Passwort ein (max. 1024 Bytes, ohne Nullzeichen).",
   "validation.registrar": "Gib die Serveradresse an, optional mit :Port. Ohne sip:, Leerzeichen oder Pfad.",
-  "validation.username": "Nutze den SIP-Benutzernamen aus deinen Zugangsdaten (max. 80 Zeichen), keine E-Mail-Adresse."
+  "validation.username": "Nutze den SIP-Benutzernamen aus deinen Zugangsdaten (max. 80 Zeichen), keine E-Mail-Adresse.",
+  "settings.linux_microphone_help": "Linux stellt hier keinen allgemeinen Mikrofon-Freigabestatus bereit. Prüfe den Zugriff mit dem Mikrofontest unter Ton.",
+  "settings.notification_service_available": "Desktop-Benachrichtigungen verfügbar",
+  "settings.linux_notifications_help": "Dein Desktop unterstützt Benachrichtigungen mit Anrufaktionen. Ob sie angezeigt werden, hängt von deinen Systemeinstellungen und „Nicht stören“ ab."
 }

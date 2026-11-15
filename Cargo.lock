@@ -286,12 +286,15 @@ name = "baresip-adapter"
 version = "0.1.1"
 dependencies = [
  "cc",
+ "gtk",
  "libc",
  "phone-core",
+ "pkg-config",
  "quick-xml",
  "serde_json",
  "windows",
  "windows-core",
+ "zbus",
 ]
 
 [[package]]
@@ -3913,6 +3916,7 @@ dependencies = [
  "phone-core",
  "rusqlite",
  "rust-i18n",
+ "secret-service",
  "security-framework",
  "serde",
  "serde_json",
@@ -3922,6 +3926,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
+ "zbus",
 ]
 
 [[package]]

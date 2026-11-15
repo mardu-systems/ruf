@@ -19,6 +19,8 @@ if (!target)
     "Unsupported native build host; use macOS arm64, Windows x64 or Linux x64/arm64.",
   );
 const windows = process.platform === "win32";
+if (process.platform === "linux")
+  execFileSync("pkg-config", ["--exists", "libpulse"], { stdio: "inherit" });
 const build = join(root, "native/build", target);
 const prefix = join(root, "native/install", target);
 const sources = join(root, "native/build/sources");
@@ -48,6 +50,9 @@ const baresipReliabilityPatch = await Bun.file(
 ).text();
 const baresipWasapiPatch = await Bun.file(
   join(root, "native/patches/baresip-wasapi.patch"),
+).text();
+const baresipPulsePatch = await Bun.file(
+  join(root, "native/patches/baresip-pulse.patch"),
 ).text();
 const stageFile = (source: string, destination: string): void => {
   if (resolve(source) === resolve(destination)) return;
@@ -140,6 +145,11 @@ run(
 run(
   "git",
   ["apply", join(root, "native/patches/baresip-wasapi.patch")],
+  patchedBaresip,
+);
+run(
+  "git",
+  ["apply", join(root, "native/patches/baresip-pulse.patch")],
   patchedBaresip,
 );
 if (!openssl && process.platform === "darwin")
@@ -274,8 +284,22 @@ for (const file of ["src.c", "play.c", "util.c", "wasapi.h"])
   );
 
 const modules = ["g711", "auconv", "auresamp", "ausine", "aufile", "srtp"];
+const pulseTests = join(prefix, "test/pulse");
+mkdirSync(pulseTests, { recursive: true });
+for (const file of [
+  "pulse.c",
+  "pulse.h",
+  "pastream.c",
+  "player.c",
+  "recorder.c",
+])
+  stageFile(
+    join(patchedBaresip, "modules/pulse", file),
+    join(pulseTests, file),
+  );
 if (process.platform === "darwin") modules.push("coreaudio");
 if (windows) modules.push("wasapi");
+if (process.platform === "linux") modules.push("pulse");
 const bareBuild = join(build, "baresip-policy");
 const reLibrary = join(prefix, "lib", windows ? "re-static.lib" : "libre.a");
 run("cmake", [
@@ -358,6 +382,7 @@ await Bun.write(
         reReliability: reReliabilityPatch,
         baresipReliability: baresipReliabilityPatch,
         baresipWasapi: baresipWasapiPatch,
+        baresipPulse: baresipPulsePatch,
       },
       modules,
       openssl: { prefix: openssl ?? "system", version: resolved.version },
