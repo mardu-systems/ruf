@@ -9,6 +9,7 @@ const pins: typeof import("./sources.json") = await Bun.file(
 ).json();
 const targets: Record<string, string> = {
   "darwin-arm64": "aarch64-apple-darwin",
+  "darwin-x64": "x86_64-apple-darwin",
   "win32-x64": "x86_64-pc-windows-msvc",
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
@@ -16,9 +17,18 @@ const targets: Record<string, string> = {
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target)
   throw new Error(
-    "Unsupported native build host; use macOS arm64, Windows x64 or Linux x64/arm64.",
+    "Unsupported native build host. macOS/Linux require x64 or arm64; Windows requires a supported MSVC host.",
   );
 const windows = process.platform === "win32";
+if (!windows) {
+  const host = execFileSync("rustc", ["-vV"], { encoding: "utf8" }).match(
+    /^host: (.+)$/m,
+  )?.[1];
+  if (host !== target)
+    throw new Error(
+      `Native SDK requires matching Rust host ${target}; got ${host ?? "unknown"}. Cross compilation and musl SDKs are not configured.`,
+    );
+}
 if (process.platform === "linux")
   execFileSync("pkg-config", ["--exists", "libpulse"], { stdio: "inherit" });
 const build = join(root, "native/build", target);
@@ -189,7 +199,7 @@ if (windows)
 if (process.platform === "darwin")
   common.push(
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
-    "-DCMAKE_OSX_ARCHITECTURES=arm64",
+    `-DCMAKE_OSX_ARCHITECTURES=${process.arch === "arm64" ? "arm64" : "x86_64"}`,
   );
 
 // Resolve and validate dependencies before compiling or replacing staged files.

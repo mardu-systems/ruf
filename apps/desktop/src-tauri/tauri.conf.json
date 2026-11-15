@@ -54,6 +54,9 @@
     "linux": {
       "deb": {
         "depends": ["libpulse0", "libayatana-appindicator3-1"]
+      },
+      "rpm": {
+        "depends": ["libpulse.so.0()(64bit)"]
       }
     },
     "macOS": {

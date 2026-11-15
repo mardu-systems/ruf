@@ -20,6 +20,15 @@ jobs:
             bundles: app,dmg
             artifact: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             openssl-cache-path: native/build/openssl-macos14/install
+            openssl-prefix: native/build/openssl-macos14/install
+            openssl-recipe: native/build-openssl-macos.sh
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundle: dmg
+            bundles: app,dmg
+            artifact: target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            openssl-cache-path: native/build/openssl-macos14-x86_64/install
+            openssl-prefix: native/build/openssl-macos14-x86_64/install
             openssl-recipe: native/build-openssl-macos.sh
           - runner: windows-2022
             target: x86_64-pc-windows-msvc
@@ -28,16 +37,34 @@ jobs:
             artifact: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             openssl-cache-path: native/build/x86_64-pc-windows-msvc/vcpkg
             openssl-recipe: native/vcpkg.*
-          - runner: ubuntu-24.04
+          - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bundle: deb
-            bundles: deb,appimage
+            bundles: deb,rpm,appimage
             artifact: |
               target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
               target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
             extra-evidence: |
+              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.cdx.json
+              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.build.json
               target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.cdx.json
               target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.build.json
+            openssl-cache-path: native/build/unused-linux-openssl
+            openssl-recipe: native/openssl-probe/**
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundle: deb
+            bundles: deb,rpm,appimage
+            artifact: |
+              target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            extra-evidence: |
+              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.cdx.json
+              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.build.json
+              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.cdx.json
+              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.build.json
             openssl-cache-path: native/build/unused-linux-openssl
             openssl-recipe: native/openssl-probe/**
     env:
@@ -50,11 +77,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Verify native host architecture
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          task_rust_host=$(rustc -vV | sed -n 's/^host: //p')
+          test "$task_rust_host" = "${{ matrix.target }}"
       - name: Install Linux desktop and audio prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config file libssl-dev libpulse-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf libfuse2t64 dbus-x11 gnome-keyring pulseaudio pulseaudio-utils xvfb xauth x11-utils python3-dbus python3-gi
+          sudo apt-get install -y cmake pkg-config file libssl-dev libpulse-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf libfuse2 dbus-x11 gnome-keyring pulseaudio pulseaudio-utils xvfb xauth x11-utils python3-dbus python3-gi rpm
       - name: Install the desktop target
         run: rustup target add ${{ matrix.target }}
       - name: Fingerprint the native compiler toolchain
@@ -79,7 +112,7 @@ jobs:
       - name: Select the macOS OpenSSL prefix
         if: runner.os == 'macOS' && steps.native-sdk.outputs.cache-hit != 'true'
         shell: bash
-        run: echo "OPENSSL_ROOT_DIR=$GITHUB_WORKSPACE/native/build/openssl-macos14/install" >> "$GITHUB_ENV"
+        run: echo "OPENSSL_ROOT_DIR=$GITHUB_WORKSPACE/${{ matrix.openssl-prefix }}" >> "$GITHUB_ENV"
       - name: Build OpenSSL for the macOS deployment target
         if: runner.os == 'macOS' && steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true'
         shell: bash
@@ -140,7 +173,9 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
       - name: Verify Linux desktop startup
         if: runner.os == 'Linux'
-        run: xvfb-run -a dbus-run-session -- bash tests/interop/linux/startup.sh target/${{ matrix.target }}/release/sip-desktop
+        run: |
+          bash tests/interop/linux/bundles.sh ${{ matrix.target }}
+          xvfb-run -a dbus-run-session -- bash tests/interop/linux/startup.sh target/${{ matrix.target }}/release/sip-desktop
       - name: Verify signed microphone permissions
         if: runner.os == 'macOS'
         run: bun run test:macos-audio target/${{ matrix.target }}/release/bundle/macos/Ruf.app

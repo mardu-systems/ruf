@@ -8,7 +8,9 @@ license.workspace = true
 publish = false
 
 [features]
-default = []
+# Expose the tray to Tauri's package dependency discovery as well as Cargo.
+default = ["tray-icon"]
+tray-icon = ["tauri/tray-icon"]
 native = ["baresip-adapter/native"]
 app-store = ["native"]
 

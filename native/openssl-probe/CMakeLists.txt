@@ -12,6 +12,13 @@ if(APPLE)
     message(FATAL_ERROR "Set CMAKE_OSX_DEPLOYMENT_TARGET before checking OpenSSL")
   endif()
   foreach(library "${OPENSSL_SSL_LIBRARY}" "${OPENSSL_CRYPTO_LIBRARY}")
+    foreach(architecture IN LISTS CMAKE_OSX_ARCHITECTURES)
+      execute_process(COMMAND lipo -verify_arch "${architecture}" "${library}"
+        OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE architecture_status)
+      if(NOT architecture_status EQUAL 0)
+        message(FATAL_ERROR "OpenSSL ${library} does not contain macOS architecture ${architecture}. Build matching static OpenSSL and set OPENSSL_ROOT_DIR.")
+      endif()
+    endforeach()
     execute_process(COMMAND otool -l "${library}"
       OUTPUT_VARIABLE commands ERROR_VARIABLE inspection_error RESULT_VARIABLE status)
     if(NOT status EQUAL 0)

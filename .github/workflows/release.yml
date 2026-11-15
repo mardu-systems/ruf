@@ -51,6 +51,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           pattern: desktop-*
@@ -63,31 +66,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          mac=(artifacts/desktop-aarch64-apple-darwin/*.dmg)
-          windows=(artifacts/desktop-x86_64-pc-windows-msvc/*.exe)
-          mac_sbom=(artifacts/desktop-aarch64-apple-darwin/*.cdx.json)
-          windows_sbom=(artifacts/desktop-x86_64-pc-windows-msvc/*.cdx.json)
-          mac_evidence=(artifacts/desktop-aarch64-apple-darwin/*.build.json)
-          windows_evidence=(artifacts/desktop-x86_64-pc-windows-msvc/*.build.json)
-          linux_deb=(artifacts/desktop-x86_64-unknown-linux-gnu/deb/*.deb)
-          linux_appimage=(artifacts/desktop-x86_64-unknown-linux-gnu/appimage/*.AppImage)
-          linux_sbom=(artifacts/desktop-x86_64-unknown-linux-gnu/deb/*.cdx.json)
-          linux_evidence=(artifacts/desktop-x86_64-unknown-linux-gnu/deb/*.build.json)
-          if [[ ${#mac[@]} -ne 1 || ${#windows[@]} -ne 1 || ${#mac_sbom[@]} -ne 1 || ${#windows_sbom[@]} -ne 1 || ${#mac_evidence[@]} -ne 1 || ${#windows_evidence[@]} -ne 1 ]]; then
-            echo "Expected one installer, SBOM and build-hash manifest per desktop target."
-            exit 1
-          fi
-          if [[ ${#linux_deb[@]} -ne 1 || ${#linux_appimage[@]} -ne 1 || ${#linux_sbom[@]} -ne 1 || ${#linux_evidence[@]} -ne 1 ]]; then
-            echo "Expected Linux DEB, AppImage, SBOM and build-hash manifest."
-            exit 1
-          fi
-          sbom=("${mac_sbom[@]}" "${windows_sbom[@]}" "${linux_sbom[@]}")
-          evidence=("${mac_evidence[@]}" "${windows_evidence[@]}" "${linux_evidence[@]}")
-          for asset in "${mac[@]}" "${windows[@]}" "${linux_deb[@]}" "${linux_appimage[@]}"; do
+          bun scripts/release-artifacts.ts artifacts "$RELEASE_TAG" > "$RUNNER_TEMP/ruf-release-assets.txt"
+          mapfile -t assets < "$RUNNER_TEMP/ruf-release-assets.txt"
+          for asset in "${assets[@]}"; do
             (cd "$(dirname "$asset")" && sha256sum "$(basename "$asset")")
           done > artifacts/SHA256SUMS
-          gh release create "$RELEASE_TAG" "${mac[@]}" "${windows[@]}" "${linux_deb[@]}" "${linux_appimage[@]}" "${sbom[@]}" "${evidence[@]}" \
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
             artifacts/SHA256SUMS \
             --verify-tag --draft --prerelease --title "Ruf ${RELEASE_TAG#v} Developer Preview" \
             --notes-file "docs/releases/${RELEASE_TAG#v}.md"
