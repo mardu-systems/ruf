@@ -2,6 +2,8 @@
   import { t, text, message, type MessageValue } from "../i18n";
   import { onMount } from "svelte";
   import type { AudioDevices, SoundSettings } from "../generated/AppInfo";
+  const isWindows =
+    typeof navigator !== "undefined" && /Win/.test(navigator.platform);
   let {
     value = $bindable(),
     devices,
@@ -125,7 +127,13 @@
     </div>
   {/each}
   <div class="sound-device-actions">
-    <p>{$t("settings.system_default_help")}</p>
+    <p>
+      {$t(
+        isWindows
+          ? "settings.windows_system_default_help"
+          : "settings.system_default_help",
+      )}
+    </p>
     <button
       class="text-button"
       type="button"

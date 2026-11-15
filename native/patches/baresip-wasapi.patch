@@ -1,0 +1,562 @@
+diff --git a/include/baresip.h b/include/baresip.h
+index b590dff..7037bb3 100644
+--- a/include/baresip.h
++++ b/include/baresip.h
+@@ -679,6 +679,8 @@ struct auplay {
+ 	const char      *name;
+ 	struct list      dev_list;
+ 	auplay_alloc_h  *alloch;
++	/** Optional terminal status hook; must safely read worker state. */
++	int (*errorh)(const struct auplay_st *st);
+ };
+ 
+ int auplay_register(struct auplay **pp, struct list *auplayl,
+@@ -688,6 +690,8 @@ int auplay_alloc(struct auplay_st **stp, struct list *auplayl,
+ 		 const char *name,
+ 		 struct auplay_prm *prm, const char *device,
+ 		 auplay_write_h *wh, void *arg);
++/** Read terminal player errno on the event loop; 0 for absent state/hook. */
++int auplay_error(const struct auplay *ap, const struct auplay_st *st);
+ 
+ 
+ /*
+@@ -889,6 +893,8 @@ int  play_tone(struct play **playp, struct player *player,
+ 	       struct mbuf *tone,
+ 	       uint32_t srate, uint8_t ch, int repeat,
+ 	       const char *play_mod, const char *play_dev);
++/** Read terminal output errno on the event loop; 0 for absent player/hook. */
++int play_error(const struct play *play);
+ void play_set_finish_handler(struct play *play, play_finish_h *fh, void *arg);
+ int  play_init(struct player **playerp);
+ void play_set_path(struct player *player, const char *path);
+@@ -1474,6 +1480,8 @@ int  audio_start_source(struct audio *a, struct list *ausrcl,
+ 			struct list *aufiltl);
+ void audio_stop(struct audio *a);
+ bool audio_started(const struct audio *a);
++/** Read terminal output errno on the event loop; 0 for absent player/hook. */
++int audio_play_error(const struct audio *audio);
+ int  audio_set_conference(struct audio *au, bool conference);
+ bool audio_is_conference(const struct audio *au);
+ int  audio_encoder_set(struct audio *a, const struct aucodec *ac,
+diff --git a/src/audio.c b/src/audio.c
+index e42f963..a01ebbf 100644
+--- a/src/audio.c
++++ b/src/audio.c
+@@ -1956,3 +1956,9 @@ struct config_audio *audio_config(struct audio *au)
+ {
+ 	return au ? &au->cfg : NULL;
+ }
++
++
++int audio_play_error(const struct audio *audio)
++{
++	return audio ? aurecv_player_error(audio->aur) : 0;
++}
+diff --git a/src/auplay.c b/src/auplay.c
+index 7edc575..89f6074 100644
+--- a/src/auplay.c
++++ b/src/auplay.c
+@@ -108,3 +108,9 @@ int auplay_alloc(struct auplay_st **stp, struct list *auplayl,
+ 
+ 	return ap->alloch(stp, ap, prm, device, wh, arg);
+ }
++
++
++int auplay_error(const struct auplay *ap, const struct auplay_st *st)
++{
++	return ap && st && ap->errorh ? ap->errorh(st) : 0;
++}
+diff --git a/src/aureceiver.c b/src/aureceiver.c
+index cebef8e..0e3f23b 100644
+--- a/src/aureceiver.c
++++ b/src/aureceiver.c
+@@ -840,3 +840,9 @@ out:
+ 	mem_deref(mb);
+ 	return err;
+ }
++
++
++int aurecv_player_error(const struct audio_recv *ar)
++{
++	return ar ? auplay_error(ar->ap, ar->auplay) : 0;
++}
+diff --git a/src/core.h b/src/core.h
+index ea47a34..3a807b3 100644
+--- a/src/core.h
++++ b/src/core.h
+@@ -135,6 +135,7 @@ void aurecv_receive(struct audio_recv *ar, const struct rtp_header *hdr,
+ void aurecv_reset(struct audio_recv *ar);
+ int  aurecv_start_player(struct audio_recv *ar, struct list *auplayl);
+ bool aurecv_player_started(const struct audio_recv *ar);
++int  aurecv_player_error(const struct audio_recv *ar);
+ void aurecv_stop(struct audio_recv *ar);
+ void aurecv_stop_auplay(struct audio_recv *ar);
+ 
+diff --git a/src/play.c b/src/play.c
+index 3b3075c..2b73eb5 100644
+--- a/src/play.c
++++ b/src/play.c
+@@ -20,6 +20,7 @@ struct play {
+ 	mtx_t lock;
+ 	struct mbuf *mb;
+ 	struct auplay_st *auplay;
++	const struct auplay *ap;
+ 	char *mod;
+ 	char *dev;
+ 	struct tmr tmr;
+@@ -303,6 +304,7 @@ int play_tone(struct play **playp, struct player *player,
+ 	wprm.ptime      = PTIME;
+ 	wprm.fmt        = AUFMT_S16LE;
+ 
++	play->ap = auplay_find(baresip_auplayl(), play_mod);
+ 	err = auplay_alloc(&play->auplay, baresip_auplayl(),
+ 			   play_mod, &wprm,
+ 			   play_dev, write_handler, play);
+@@ -404,6 +406,7 @@ static int start_auplay(struct play *play)
+ 	wprm.ptime = play->sprm.ptime;
+ 	wprm.fmt   = play->sprm.fmt;
+ 
++	play->ap = auplay_find(baresip_auplayl(), play->mod);
+ 	err = auplay_alloc(&play->auplay, baresip_auplayl(),
+ 			   play->mod, &wprm,
+ 			   play->dev, aubuf_write_handler, play);
+@@ -690,3 +693,9 @@ void play_set_path(struct player *player, const char *path)
+ 
+ 	str_ncpy(player->play_path, path, sizeof(player->play_path));
+ }
++
++
++int play_error(const struct play *play)
++{
++	return play ? auplay_error(play->ap, play->auplay) : 0;
++}
+diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
+--- a/modules/wasapi/src.c
++++ b/modules/wasapi/src.c
+@@ -29,6 +29,10 @@
+ struct ausrc_st {
+ 	thrd_t thread;
+ 	RE_ATOMIC bool run;
++	RE_ATOMIC int startup, error;
++	bool thread_started;
++	struct tmr error_timer;
++	ausrc_error_h *errh;
+ 	struct ausrc_prm prm;
+ 	ausrc_read_h *rh;
+ 	struct pl *device;
+@@ -41,8 +45,9 @@
+ static void ausrc_destructor(void *arg)
+ {
+ 	struct ausrc_st *st = arg;
+-	/* Wait for termination of other thread */
+-	if (re_atomic_rlx(&st->run)) {
++	tmr_cancel(&st->error_timer);
++	/* Always join an exited worker before releasing callback state. */
++	if (st->thread_started) {
+ 		re_atomic_rlx_set(&st->run, false);
+ 		thrd_join(st->thread, NULL);
+ 	}
+@@ -55,7 +60,9 @@
+ static int src_thread(void *arg)
+ {
+ 	struct ausrc_st *st = arg;
+-	bool started = false;
++	bool started = false, initialized = false, reopen = false;
++	uint64_t recovery_deadline = 0, default_check = 0;
++	LPWSTR active_device = NULL;
+ 	HRESULT hr;
+ 	IMMDevice *capturer		= NULL;
+ 	IMMDeviceEnumerator *enumerator = NULL;
+@@ -77,11 +84,15 @@
+ 					  COINIT_DISABLE_OLE1DDE |
+ 					  COINIT_SPEED_OVER_MEMORY);
+ 	CHECK_HR(hr, "wasapi/src: CoInitializeEx failed");
++	initialized = true;
+ 
+ 	hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+ 			      &IID_IMMDeviceEnumerator, (void **)&enumerator);
+ 	CHECK_HR(hr, "wasapi/src: CoCreateInstance failed");
+ 
++ open_device:
++	if (!re_atomic_rlx(&st->run)) goto out;
++	err = 0; hr = S_OK; reopen = false;
+ 	if (pl_strcasecmp(st->device, "default") == 0) {
+ 		hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(
+ 			enumerator, eCapture, eCommunications, &capturer);
+@@ -96,6 +107,9 @@
+ 		CHECK_HR(hr, "wasapi/src: GetDevice failed");
+ 	}
+ 
++	hr = IMMDevice_GetId(capturer, &active_device);
++	CHECK_HR(hr, "wasapi/src: GetId failed");
++
+ 	hr = IMMDevice_Activate(capturer, &IID_IAudioClient, CLSCTX_ALL,
+ 				NULL, (void **)&client);
+ 	CHECK_HR(hr, "wasapi/src: IMMDevice_Activate failed");
+@@ -129,8 +143,16 @@
+ 	CHECK_HR(hr, "wasapi/src: IAudioClient_Start failed");
+ 
+ 	started = true;
++	if (!wasapi_started(&st->startup)) { err = ECANCELED; goto out; }
++	default_check = tmr_jiffies() + WASAPI_DEFAULT_CHECK_MS;
+ 
+ 	while (re_atomic_rlx(&st->run)) {
++		if (!pl_strcasecmp(st->device, "default") && tmr_jiffies() >= default_check) {
++			default_check = tmr_jiffies() + WASAPI_DEFAULT_CHECK_MS;
++			if (wasapi_default_changed(enumerator, eCapture, active_device)) {
++				reopen = true; err = ENODEV; goto out;
++			}
++		}
+ 		hr = IAudioCaptureClient_GetNextPacketSize(service,
+ 						    &packet_sz);
+ 		CHECK_HR(hr, "wasapi/src: GetNextPacketSize failed");
+@@ -148,31 +170,70 @@
+ 		af.timestamp = tmr_jiffies_usec();
+ 		af.sampc = num_frames * format->nChannels;
+ 
+-		st->rh(&af, st->arg);
++		/* SILENT packets need not expose readable sample memory. */
++		if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
++			if (af.sampc > st->sampc) {
++				void *samples = mem_realloc(st->sampv, aufmt_sample_size(st->prm.fmt) * af.sampc);
++				if (!samples) { err = ENOMEM; goto out; }
++				st->sampv = samples; st->sampc = af.sampc;
++			}
++			memset(st->sampv, 0, aufmt_sample_size(st->prm.fmt) * af.sampc);
++			af.sampv = st->sampv;
++		}
++		if (!af.sampv && af.sampc) { err = EIO; goto out; }
++		if (af.sampc) st->rh(&af, st->arg);
+ 
+ 		hr = IAudioCaptureClient_ReleaseBuffer(service, num_frames);
+ 		CHECK_HR(hr, "wasapi/src: ReleaseBuffer failed");
++		recovery_deadline = 0;
+ 	}
+ 
+ out:
+-	if (started)
+-		IAudioClient_Stop(client);
+-	if (service)
+-		IAudioCaptureClient_Release(service);
+-	if (client)
+-		IAudioClient_Release(client);
+-	if (capturer)
+-		IMMDevice_Release(capturer);
+-	if (enumerator)
+-		IMMDeviceEnumerator_Release(enumerator);
+-
++	if (started) IAudioClient_Stop(client);
++	if (service) IAudioCaptureClient_Release(service);
++	if (client) IAudioClient_Release(client);
++	if (capturer) IMMDevice_Release(capturer);
+ 	CoTaskMemFree(format);
+-	CoUninitialize();
++	CoTaskMemFree(active_device);
+ 	mem_deref(device);
++	started = false; service = NULL; client = NULL; capturer = NULL;
++	format = NULL; active_device = NULL; device = NULL;
++
++	/* Keep selected endpoint identity; default streams re-resolve communications.
++	 * Only device/service invalidation retries. Access denial fails immediately. */
++	if (re_atomic_rlx(&st->run) &&
++	    re_atomic_load(&st->startup, re_memory_order_acquire) != EINPROGRESS &&
++	    (reopen || wasapi_recoverable(hr) ||
++	     (recovery_deadline && FAILED(hr) && hr != E_ACCESSDENIED))) {
++		if (!recovery_deadline) recovery_deadline = tmr_jiffies() + WASAPI_RECOVERY_MS;
++		if (tmr_jiffies() < recovery_deadline) {
++			sys_msleep(WASAPI_RETRY_MS);
++			goto open_device;
++		}
++	}
++	if (enumerator) IMMDeviceEnumerator_Release(enumerator);
++	if (initialized) CoUninitialize();
++	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS)
++		re_atomic_store(&st->startup, err ? err : ECANCELED, re_memory_order_release);
++	else if (err && re_atomic_rlx(&st->run))
++		re_atomic_store(&st->error, err, re_memory_order_release);
+ 
+ 	return err;
+ }
+ 
++
++/* The upstream error handler may close the call and destroy this source.
++ * Deliver on the owning libre loop, never from the worker being joined. */
++static void src_error_tick(void *arg)
++{
++	struct ausrc_st *st = arg;
++	int err = (int)re_atomic_load(&st->error, re_memory_order_acquire);
++	if (err) {
++		if (st->errh) st->errh(err, "Windows audio input unavailable", st->arg);
++		return;
++	}
++	tmr_start(&st->error_timer, 100, src_error_tick, st);
++}
+ 
+ int wasapi_src_alloc(struct ausrc_st **stp, const struct ausrc *as,
+ 		      struct ausrc_prm *prm, const char *device,
+@@ -180,7 +241,7 @@
+ {
+ 	struct ausrc_st *st;
+ 	int err;
+-	(void)errh;
++
+ 
+ 	if (!stp || !as || !prm)
+ 		return EINVAL;
+@@ -189,6 +250,8 @@
+ 	if (!st)
+ 		return ENOMEM;
+ 
++	st->errh = errh;
++	tmr_init(&st->error_timer);
+ 	st->rh  = rh;
+ 	st->arg = arg;
+ 	st->prm = *prm;
+@@ -206,12 +269,16 @@
+ 		goto out;
+ 	}
+ 
++	re_atomic_store(&st->startup, EINPROGRESS, re_memory_order_release);
+ 	re_atomic_rlx_set(&st->run, true);
+ 	err = thread_create_name(&st->thread, "wasapi_src", src_thread, st);
+ 	if (err) {
+ 		re_atomic_rlx_set(&st->run, false);
+ 		goto out;
+ 	}
++	st->thread_started = true;
++	err = wasapi_wait_start(&st->startup);
++	if (!err) tmr_start(&st->error_timer, 100, src_error_tick, st);
+ 
+ out:
+ 	if (err)
+diff --git a/modules/wasapi/play.c b/modules/wasapi/play.c
+--- a/modules/wasapi/play.c
++++ b/modules/wasapi/play.c
+@@ -29,6 +29,8 @@
+ struct auplay_st {
+ 	thrd_t thread;
+ 	RE_ATOMIC bool run;
++	RE_ATOMIC int startup, error;
++	bool thread_started;
+ 	struct auplay_prm prm;
+ 	auplay_write_h *wh;
+ 	struct pl *device;
+@@ -41,8 +43,8 @@
+ static void auplay_destructor(void *arg)
+ {
+ 	struct auplay_st *st = arg;
+-	/* Wait for termination of other thread */
+-	if (re_atomic_rlx(&st->run)) {
++	/* Always join an exited worker before releasing callback state. */
++	if (st->thread_started) {
+ 		re_atomic_rlx_set(&st->run, false);
+ 		thrd_join(st->thread, NULL);
+ 	}
+@@ -54,7 +56,9 @@
+ static int play_thread(void *arg)
+ {
+ 	struct auplay_st *st = arg;
+-	bool started = false;
++	bool started = false, initialized = false, reopen = false;
++	uint64_t recovery_deadline = 0, default_check = 0;
++	LPWSTR active_device = NULL;
+ 	HRESULT hr;
+ 	IMMDevice *renderer		= NULL;
+ 	IMMDeviceEnumerator *enumerator = NULL;
+@@ -77,11 +81,15 @@
+ 					  COINIT_DISABLE_OLE1DDE |
+ 					  COINIT_SPEED_OVER_MEMORY);
+ 	CHECK_HR(hr, "wasapi/play: CoInitializeEx failed");
++	initialized = true;
+ 
+ 	hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+ 			      &IID_IMMDeviceEnumerator, (void **)&enumerator);
+ 	CHECK_HR(hr, "wasapi/play: CoCreateInstance failed");
+ 
++ open_device:
++	if (!re_atomic_rlx(&st->run)) goto out;
++	err = 0; hr = S_OK; reopen = false;
+ 	if (pl_strcasecmp(st->device, "default") == 0) {
+ 		hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(
+ 			enumerator, eRender, eCommunications, &renderer);
+@@ -96,6 +104,9 @@
+ 		CHECK_HR(hr, "wasapi/play: GetDevice failed");
+ 	}
+ 
++	hr = IMMDevice_GetId(renderer, &active_device);
++	CHECK_HR(hr, "wasapi/play: GetId failed");
++
+ 	hr = IMMDevice_Activate(renderer, &IID_IAudioClient, CLSCTX_ALL,
+ 				NULL, (void **)&client);
+ 	CHECK_HR(hr, "wasapi/play: IMMDevice_Activate failed");
+@@ -129,8 +140,16 @@
+ 	CHECK_HR(hr, "wasapi/play: IAudioClient_Start failed");
+ 
+ 	started = true;
++	if (!wasapi_started(&st->startup)) { err = ECANCELED; goto out; }
++	default_check = tmr_jiffies() + WASAPI_DEFAULT_CHECK_MS;
+ 
+ 	while (re_atomic_rlx(&st->run)) {
++		if (!pl_strcasecmp(st->device, "default") && tmr_jiffies() >= default_check) {
++			default_check = tmr_jiffies() + WASAPI_DEFAULT_CHECK_MS;
++			if (wasapi_default_changed(enumerator, eRender, active_device)) {
++				reopen = true; err = ENODEV; goto out;
++			}
++		}
+ 		hr = IAudioClient_GetCurrentPadding(client,
+ 						    &num_frames_padding);
+ 		CHECK_HR(hr, "wasapi/play: GetCurrentPadding failed");
+@@ -150,22 +169,39 @@
+ 
+ 		hr = IAudioRenderClient_ReleaseBuffer(service, num_frames, 0);
+ 		CHECK_HR(hr, "wasapi/play: ReleaseBuffer failed");
++		recovery_deadline = 0;
+ 	}
+ 
+ 
+ out:
+-	if (started)
+-		IAudioClient_Stop(client);
+-	if (service)
+-		IAudioRenderClient_Release(service);
+-	if (client)
+-		IAudioClient_Release(client);
+-	if (enumerator)
+-		IMMDeviceEnumerator_Release(enumerator);
+-
++	if (started) IAudioClient_Stop(client);
++	if (service) IAudioRenderClient_Release(service);
++	if (client) IAudioClient_Release(client);
++	if (renderer) IMMDevice_Release(renderer);
+ 	CoTaskMemFree(format);
+-	CoUninitialize();
++	CoTaskMemFree(active_device);
+ 	mem_deref(device);
++	started = false; service = NULL; client = NULL; renderer = NULL;
++	format = NULL; active_device = NULL; device = NULL;
++
++	/* Keep selected endpoint identity; default streams re-resolve communications.
++	 * Only device/service invalidation retries. Access denial fails immediately. */
++	if (re_atomic_rlx(&st->run) &&
++	    re_atomic_load(&st->startup, re_memory_order_acquire) != EINPROGRESS &&
++	    (reopen || wasapi_recoverable(hr) ||
++	     (recovery_deadline && FAILED(hr) && hr != E_ACCESSDENIED))) {
++		if (!recovery_deadline) recovery_deadline = tmr_jiffies() + WASAPI_RECOVERY_MS;
++		if (tmr_jiffies() < recovery_deadline) {
++			sys_msleep(WASAPI_RETRY_MS);
++			goto open_device;
++		}
++	}
++	if (enumerator) IMMDeviceEnumerator_Release(enumerator);
++	if (initialized) CoUninitialize();
++	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS)
++		re_atomic_store(&st->startup, err ? err : ECANCELED, re_memory_order_release);
++	else if (err && re_atomic_rlx(&st->run))
++		re_atomic_store(&st->error, err, re_memory_order_release);
+ 
+ 	return err;
+ }
+@@ -202,12 +238,15 @@
+ 		goto out;
+ 	}
+ 
++	re_atomic_store(&st->startup, EINPROGRESS, re_memory_order_release);
+ 	re_atomic_rlx_set(&st->run, true);
+ 	err = thread_create_name(&st->thread, "wasapi_play", play_thread, st);
+ 	if (err) {
+ 		re_atomic_rlx_set(&st->run, false);
+ 		goto out;
+ 	}
++	st->thread_started = true;
++	err = wasapi_wait_start(&st->startup);
+ 
+ out:
+ 	if (err)
+@@ -217,3 +256,9 @@
+ 
+ 	return err;
+ }
++
++/* Read on the owning event loop; no worker callback can destroy itself. */
++int wasapi_play_error(const struct auplay_st *st)
++{
++	return st ? (int)re_atomic_load(&st->error, re_memory_order_acquire) : 0;
++}
+diff --git a/modules/wasapi/wasapi.h b/modules/wasapi/wasapi.h
+--- a/modules/wasapi/wasapi.h
++++ b/modules/wasapi/wasapi.h
+@@ -1,3 +1,54 @@
++#ifndef WASAPI_H
++#define WASAPI_H
++#include <re_atomic.h>
++#include <wchar.h>
++
++/* Startup waits for IAudioClient_Start, not merely successful thread creation. */
++enum { WASAPI_START_MS = 5000, WASAPI_RECOVERY_MS = 5000,
++       WASAPI_RETRY_MS = 100, WASAPI_DEFAULT_CHECK_MS = 250 };
++static inline int wasapi_wait_start(RE_ATOMIC int *status)
++{
++	uint64_t deadline = tmr_jiffies() + WASAPI_START_MS;
++	int result;
++	while ((result = (int)re_atomic_load(status, re_memory_order_acquire)) == EINPROGRESS) {
++		if (tmr_jiffies() >= deadline) {
++			int pending = EINPROGRESS;
++			if (re_atomic_compare_exchange_strong(status, &pending, ETIMEDOUT,
++			    re_memory_order_acq_rel, re_memory_order_acquire)) return ETIMEDOUT;
++			continue; /* The worker may have won at the timeout boundary. */
++		}
++		sys_msleep(1);
++	}
++	return result;
++}
++/* Success and cancellation race through one atomic transition. A cancelled
++ * startup must never enter a media callback that its waiting owner may lock. */
++static inline bool wasapi_started(RE_ATOMIC int *status)
++{
++	int pending = EINPROGRESS;
++	return re_atomic_compare_exchange_strong(status, &pending, 0,
++		re_memory_order_acq_rel, re_memory_order_acquire) || pending == 0;
++}
++static inline bool wasapi_recoverable(HRESULT result)
++{
++	return result == AUDCLNT_E_DEVICE_INVALIDATED ||
++	       result == AUDCLNT_E_RESOURCES_INVALIDATED ||
++	       result == AUDCLNT_E_SERVICE_NOT_RUNNING;
++}
++static inline bool wasapi_default_changed(IMMDeviceEnumerator *enumerator,
++					 int flow, LPCWSTR current)
++{
++	IMMDevice *device = NULL;
++	LPWSTR id = NULL;
++	HRESULT result = IMMDeviceEnumerator_GetDefaultAudioEndpoint(enumerator,
++		flow, eCommunications, &device);
++	if (SUCCEEDED(result)) result = IMMDevice_GetId(device, &id);
++	bool changed = FAILED(result) || !id || !current || wcscmp(id, current);
++	CoTaskMemFree(id);
++	if (device) IMMDevice_Release(device);
++	return changed;
++}
++
+ /**
+  * @file wasapi/wasapi.h Windows Audio Session API (WASAPI)
+  *
+@@ -57,3 +108,7 @@
+ 		      ausrc_read_h *rh, ausrc_error_h *errh, void *arg);
+ int wasapi_wc_to_utf8(char **dst, LPCWSTR src);
+ int wasapi_wc_from_utf8(LPWSTR *dst, const struct pl *src);
++
++int wasapi_play_error(const struct auplay_st *st);
++
++#endif
+diff --git a/modules/wasapi/wasapi.c b/modules/wasapi/wasapi.c
+--- a/modules/wasapi/wasapi.c
++++ b/modules/wasapi/wasapi.c
+@@ -179,6 +179,8 @@
+ 	if (err)
+ 		return err;
+ 
++	auplay->errorh = wasapi_play_error;
++
+ 	err = thread_create_name(&thread, "wasapi_devices", device_thread,
+ 				 NULL);
+ 	thrd_join(thread, &err);

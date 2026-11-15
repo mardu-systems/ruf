@@ -64,6 +64,28 @@ test("stored permission errors translate again after a language change", () => {
   );
 });
 
+test("unsupported microphone query can expose OS settings without changing other permissions", () => {
+  locale.set("en");
+  const props = {
+    title: "Microphone",
+    status: "unsupported" as const,
+    oncheck() {},
+    onopen() {},
+  };
+  expect(render(PermissionStatus, { props }).body).not.toContain(
+    "Open System Settings",
+  );
+  const microphone = render(PermissionStatus, {
+    props: {
+      ...props,
+      unsupportedLabel: "Permission query unavailable",
+      allowUnsupportedSettings: true,
+    },
+  }).body;
+  expect(microphone).toContain("Permission query unavailable");
+  expect(microphone).toContain("Open System Settings");
+});
+
 test("both offline release-note bundles retain every release and change", async () => {
   const { parseChangelog } =
     await import("../../apps/desktop/src/lib/changelog");

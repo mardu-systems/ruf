@@ -489,6 +489,50 @@ impl PhoneSession {
         self.settings = next;
         self.snapshot()
     }
+    /// Start a bounded native diagnostic, initializing the saved audio backend on demand.
+    /// No account is required; settings and credentials remain unchanged. A stopped
+    /// session returns InvalidState; device, ownership and native errors come from Engine.
+    pub fn start_audio_test(
+        &mut self,
+        kind: phone_core::AudioTestKind,
+        device: &str,
+    ) -> Result<String, PhoneError> {
+        if self.stopped {
+            return Err(PhoneError::new(
+                ErrorCode::InvalidState,
+                "The phone is shutting down.",
+            ));
+        }
+        if self.engine.is_none() {
+            SoundSettings {
+                input_device: device.into(),
+                ..Default::default()
+            }
+            .validate()?;
+            self.engine = Some(self.start_engine(self.settings.audio_mode, &self.settings.sound)?);
+        }
+        self.engine()?.start_audio_test(kind, device)
+    }
+
+    /// Stop only the owned diagnostic without initializing an absent engine.
+    /// Valid stale tokens are harmless even before the first test; malformed tokens
+    /// return InvalidInput consistently with the engine's canonical nonzero u64 tokens.
+    pub fn stop_audio_test(&mut self, id: &str) -> Result<(), PhoneError> {
+        if let Some(engine) = self.engine.as_mut() {
+            return engine.stop_audio_test(id);
+        }
+        if !id
+            .parse::<u64>()
+            .is_ok_and(|token| token != 0 && token.to_string() == id)
+        {
+            return Err(PhoneError::new(
+                ErrorCode::InvalidInput,
+                "Invalid audio test token.",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn preview_ring(&mut self, device: String) -> Result<EngineSnapshot, PhoneError> {
         if self.engine.is_none() {
             self.engine = Some(self.start_engine(self.settings.audio_mode, &self.settings.sound)?);
@@ -1165,6 +1209,128 @@ mod tests {
         );
         restored.shutdown().unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod audio_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(not(feature = "native"))]
+    fn first_audio_test_reaches_backend_without_an_account() {
+        let mut session = PhoneSession::default();
+        session.settings.sound.ringtone_volume = 37;
+        let before = session.settings.clone();
+
+        let error = session
+            .start_audio_test(phone_core::AudioTestKind::Speaker, "")
+            .unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::EngineUnavailable);
+        assert!(session.settings == before);
+        assert!(session.snapshot().unwrap().accounts.is_empty());
+    }
+
+    #[test]
+    fn first_audio_test_rejects_invalid_devices_before_starting_engine() {
+        let mut session = PhoneSession::default();
+        for device in ["invalid\nendpoint", &"x".repeat(128)] {
+            let error = session
+                .start_audio_test(phone_core::AudioTestKind::Speaker, device)
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput);
+            assert!(session.engine.is_none());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn first_audio_tests_preserve_saved_settings_without_credentials() {
+        let _guard = super::credential_recovery_tests::NATIVE_RECOVERY_TEST
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        struct NoCredentials;
+        impl store::CredentialStore for NoCredentials {
+            fn read(&self, _: &str, _: bool) -> Result<String, PhoneError> {
+                panic!("audio diagnostics must not read credentials");
+            }
+            fn write(&self, _: &str, _: &str) -> Result<(), PhoneError> {
+                panic!("audio diagnostics must not write credentials");
+            }
+            fn delete(&self, _: &str) -> Result<(), PhoneError> {
+                panic!("audio diagnostics must not delete credentials");
+            }
+        }
+
+        let root =
+            std::env::temp_dir().join(format!("sip-first-audio-test-{}", std::process::id()));
+        let store = AccountStore {
+            path: root.join("accounts.json"),
+        };
+        let mut saved = SavedSettings {
+            audio_mode: AudioMode::TestTone,
+            ..Default::default()
+        };
+        saved.sound.ringtone_volume = 37;
+        saved.sound.ringtone_enabled = false;
+        store.write(&saved).unwrap();
+        let metadata = std::fs::read(&store.path).unwrap();
+        let mut session = PhoneSession {
+            credentials: Arc::new(NoCredentials),
+            ..Default::default()
+        };
+        session.load(root.clone(), root.clone()).unwrap();
+        assert!(session.engine.is_none());
+
+        for kind in [
+            phone_core::AudioTestKind::Microphone,
+            phone_core::AudioTestKind::Speaker,
+        ] {
+            let token = session.start_audio_test(kind, "").unwrap();
+            let snapshot = session.snapshot().unwrap();
+            assert_eq!(snapshot.audio_mode, Some(AudioMode::TestTone));
+            assert_eq!(snapshot.sound_settings, saved.sound);
+            assert!(snapshot.accounts.is_empty());
+            assert_eq!(snapshot.audio_test.unwrap().id, token);
+            session.stop_audio_test(&token).unwrap();
+            assert!(session.snapshot().unwrap().audio_test.is_none());
+        }
+        assert!(session.settings == saved);
+        assert_eq!(std::fs::read(&store.path).unwrap(), metadata);
+        session.shutdown().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn audio_test_cannot_restart_a_stopped_session() {
+        let mut session = PhoneSession::default();
+        session.shutdown().unwrap();
+        let error = session
+            .start_audio_test(phone_core::AudioTestKind::Speaker, "")
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(session.engine.is_none());
+        session.stop_audio_test("1").unwrap();
+    }
+
+    #[test]
+    fn audio_test_stop_is_idempotent_without_an_engine() {
+        let mut session = PhoneSession::default();
+        for token in ["1", "18446744073709551615"] {
+            session.stop_audio_test(token).unwrap();
+        }
+        assert!(session.engine.is_none());
+    }
+
+    #[test]
+    fn audio_test_stop_rejects_malformed_tokens_without_an_engine() {
+        let mut session = PhoneSession::default();
+        for token in ["", "0", "01", "+1", "-1", "1 ", "18446744073709551616"] {
+            let error = session.stop_audio_test(token).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput, "token: {token:?}");
+        }
+        assert!(session.engine.is_none());
     }
 }
 

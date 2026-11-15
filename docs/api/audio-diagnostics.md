@@ -48,15 +48,41 @@ Missing required arguments and unknown test kinds are rejected by IPC
 deserialization. Invalid devices or malformed owner tokens return `invalidInput`.
 Both test commands use the existing phone session and can restore saved accounts;
 unlike permission queries, they can read local metadata and saved credentials.
-No configured engine or a shutting-down session returns `invalidState`; local
-metadata access failures return `storageFailure`. Concurrent calls/tests or
+Starting a test needs no configured account: it lazily initializes the existing
+baresip engine with the saved audio mode and sound settings, just like ringtone
+preview. Invalid device syntax is rejected before lazy engine initialization.
+Starting does not create an account, change settings or save credentials.
+After normal session restoration, stopping a valid stale token succeeds even
+when no engine exists; stopping itself never initializes a diagnostic engine.
+Malformed tokens still return `invalidInput` in that case. A shutting-down session
+returns `invalidState`; local metadata access failures return `storageFailure`. Concurrent calls/tests or
 ringtone previews return `busy`; a real incoming call winning after validation
 can yield `nativeFailure` from the repeated native guard. Unlinked builds return
 `engineUnavailable`. Missing/ambiguous/unavailable hardware, capture/playback
 errors and missing authorization return `nativeFailure`. An accepted start does
 not prove that physical speakers are audible or that microphone input contains
-speech. Device disappearance during a test stops capture and surfaces a native
-failure when the backend reports it; the ten-second bound remains in force.
+speech. The ten-second capture bound remains in force during device recovery.
+
+On Windows, a successful start waits for WASAPI `IAudioClient::Start`, rather
+than merely accepting a worker thread. The startup handshake allows five seconds
+before cancellation; cleanup still joins the worker, so a blocked OS/driver call
+can delay return. Access denial and other terminal startup errors return
+`nativeFailure`. Silent Windows capture packets produce zero samples even when
+Windows supplies no readable sample pointer.
+
+An active Windows stream retries device/resource invalidation or a stopped audio
+service for up to five seconds, with 100 ms between attempts. Fixed routes reopen
+the same endpoint ID. Default routes resolve the current **communications**
+endpoint independently for each direction; active default streams also check for
+role changes every 250 ms. No settings are rewritten during recovery. If recovery
+fails, microphone/speaker tests stop and report `audioTestError`; failed ringtone
+output stops and reports `lastError`. Terminal conversation-output failure reports
+the owning call's error and ends that dialog through the existing native hangup
+path. Source errors are delivered on the native loop through baresip's existing
+error handler. A denied endpoint is not retried indefinitely.
+
+These Windows worker regressions are tested with injected OS responses. They do
+not replace the [physical Windows acceptance matrix](../windows-audio-acceptance.md).
 
 `SoundSettings` adds `ringtone: "classic" | "soft" | "short"` and
 `ringtoneVolume: number` (integer 0..100). Both fields have deserialization

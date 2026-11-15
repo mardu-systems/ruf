@@ -61,7 +61,7 @@ struct sip_account {
 struct native_dialog {
     struct call *call;
     struct ua *ua;
-    bool answered, muted, consultation, hold_target, return_held, local_ending;
+    bool answered, muted, consultation, hold_target, return_held, local_ending, playback_failed;
     bool hold_explicit, return_pending;
     uint32_t account_id;
     uint64_t generation, deadline, transfer_peer_generation;
@@ -448,13 +448,39 @@ static void remove_pending(struct engine *e, struct request *r) {
     if (*p) *p = r->next;
 }
 
+/* Query backend atomics on the native loop. A worker must never invoke a call
+ * error callback that destroys and joins that same worker. */
+static void check_audio_players(struct engine *e) {
+    int error = play_error(e->test_player);
+    if (error && e->test_id) {
+        emit_test(e, EV_TEST_FAILED, error, e->test_id);
+        stop_audio_test(e);
+    }
+    error = play_error(e->ring);
+    if (error) {
+        stop_ring(e);
+        emit(e, EV_ERROR, error);
+    }
+    for (size_t i = 0; i < 2; ++i) {
+        struct native_dialog *dialog = &e->dialogs[i];
+        if (!dialog->call || dialog->playback_failed) continue;
+        error = audio_play_error(call_audio(dialog->call));
+        if (!error) continue;
+        dialog->playback_failed = true;
+        e->current = dialog;
+        emit(e, EV_CALL_ERROR, error);
+        ua_hangup(dialog->ua, dialog->call, 0, NULL);
+    }
+    e->current = e->selected;
+}
+
 /* Shutdown never depends on allocation or available pipe capacity. */
 static void shutdown_tick(void *arg) {
     struct engine *e = arg;
     bool stop;
     LOCK(&e->lock); stop = e->stop_requested; UNLOCK(&e->lock);
     if (stop) { emit(e, EV_INTERRUPTING, 0); stop_audio_test(e); stop_ring(e); ua_stop_all(true); re_cancel(); }
-    else tmr_start(&e->shutdown_timer, 50, shutdown_tick, e);
+    else { check_audio_players(e); tmr_start(&e->shutdown_timer, 50, shutdown_tick, e); }
 }
 
 static void network_tick(void *arg) {

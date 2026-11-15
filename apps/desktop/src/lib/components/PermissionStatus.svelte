@@ -12,6 +12,8 @@
     disabled = false,
     error = null,
     requestLabel = message("settings.request_access"),
+    unsupportedLabel = message("settings.unavailable"),
+    allowUnsupportedSettings = false,
     oncheck,
     onrequest,
     onopen,
@@ -23,6 +25,8 @@
     disabled?: boolean;
     error?: MessageValue | null;
     requestLabel?: MessageValue;
+    unsupportedLabel?: MessageValue;
+    allowUnsupportedSettings?: boolean;
     oncheck: () => void;
     onrequest?: (() => void) | undefined;
     onopen?: (() => void) | undefined;
@@ -32,11 +36,11 @@
     notDetermined: message("settings.permission_not_requested"),
     denied: message("settings.permission_blocked"),
     restricted: message("settings.permission_restricted"),
-    unsupported: message("settings.unavailable"),
   };
   const statusLabel = $derived.by((): MessageValue => {
     if (checking) return message("settings.permission_checking");
     if (error) return message("settings.permission_check_failed");
+    if (status === "unsupported") return unsupportedLabel;
     return status ? labels[status] : message("settings.permission_unchecked");
   });
 </script>
@@ -64,7 +68,7 @@
           ? $t("settings.confirm_system_prompt")
           : $text(requestLabel)}</button
       >{/if}
-    {#if status && status !== "unsupported" && onopen}<button
+    {#if status && (status !== "unsupported" || allowUnsupportedSettings) && onopen}<button
         type="button"
         class="secondary-button"
         disabled={disabled || working}

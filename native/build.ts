@@ -46,6 +46,9 @@ const reReliabilityPatch = await Bun.file(
 const baresipReliabilityPatch = await Bun.file(
   join(root, "native/patches/baresip-reliability.patch"),
 ).text();
+const baresipWasapiPatch = await Bun.file(
+  join(root, "native/patches/baresip-wasapi.patch"),
+).text();
 const stageFile = (source: string, destination: string): void => {
   if (resolve(source) === resolve(destination)) return;
   rmSync(destination, { force: true });
@@ -132,6 +135,11 @@ let openssl = process.env.OPENSSL_ROOT_DIR;
 run(
   "git",
   ["apply", join(root, "native/patches/baresip-reliability.patch")],
+  patchedBaresip,
+);
+run(
+  "git",
+  ["apply", join(root, "native/patches/baresip-wasapi.patch")],
   patchedBaresip,
 );
 if (!openssl && process.platform === "darwin")
@@ -256,6 +264,15 @@ stageFile(
   join(prefix, "test", windows ? "retest.exe" : "retest"),
 );
 
+// Portable fault-injection tests compile these exact patched WASAPI workers.
+const wasapiTests = join(prefix, "test/wasapi");
+mkdirSync(wasapiTests, { recursive: true });
+for (const file of ["src.c", "play.c", "util.c", "wasapi.h"])
+  stageFile(
+    join(patchedBaresip, "modules/wasapi", file),
+    join(wasapiTests, file),
+  );
+
 const modules = ["g711", "auconv", "auresamp", "ausine", "aufile", "srtp"];
 if (process.platform === "darwin") modules.push("coreaudio");
 if (windows) modules.push("wasapi");
@@ -340,6 +357,7 @@ await Bun.write(
         baresipSecurity: baresipSecurityPatch,
         reReliability: reReliabilityPatch,
         baresipReliability: baresipReliabilityPatch,
+        baresipWasapi: baresipWasapiPatch,
       },
       modules,
       openssl: { prefix: openssl ?? "system", version: resolved.version },

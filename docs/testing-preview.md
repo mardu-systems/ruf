@@ -67,6 +67,11 @@ and network topology. See the [qualification matrix](release-checklist.md#suppor
 for the larger supported-beta acceptance scope. One successful call does not
 qualify every PBX, network or platform.
 
+Windows testers should use the [Windows 11 x64 physical audio acceptance
+matrix](windows-audio-acceptance.md), including communications-device routing,
+microphone privacy, device removal and installed-app behavior. Its rows start as
+not tested; record exact versions and sanitized evidence for each result.
+
 Reports are public. Use fictional identities and sanitized results; exclude
 passwords, real phone numbers, contact lists, addresses and raw SIP/SDP captures.
 Use [SECURITY.md](../SECURITY.md) for security-sensitive findings.

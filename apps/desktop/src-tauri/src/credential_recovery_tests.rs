@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-static NATIVE_RECOVERY_TEST: Mutex<()> = Mutex::new(());
+pub(super) static NATIVE_RECOVERY_TEST: Mutex<()> = Mutex::new(());
 
 struct RecoveryCredentials {
     permit: bool,

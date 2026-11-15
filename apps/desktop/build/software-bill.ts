@@ -31,6 +31,7 @@ export interface NativeSdk {
     baresipSecurity: string;
     reReliability: string;
     baresipReliability: string;
+    baresipWasapi: string;
   };
   modules: string[];
   openssl: { version: string };
@@ -192,6 +193,7 @@ export async function createSoftwareBill(
       baresipReliability: await read(
         "native/patches/baresip-reliability.patch",
       ),
+      baresipWasapi: await read("native/patches/baresip-wasapi.patch"),
     };
     if (
       JSON.stringify(sdk.sources) !== JSON.stringify(pins) ||
@@ -270,6 +272,7 @@ export function addNative(
                   sdk.patches.baresipCallControls,
                   sdk.patches.baresipSecurity,
                   sdk.patches.baresipReliability,
+                  sdk.patches.baresipWasapi,
                 ]),
           ),
         },

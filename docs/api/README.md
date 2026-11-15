@@ -23,6 +23,18 @@ Additional settings contracts: [notifications](notifications.md),
 [local preferences](preferences.md), [native audio diagnostics](audio-diagnostics.md)
 and [account activation](account-activation.md).
 
+Windows microphone permission queries currently return `unsupported` because the
+query is unimplemented, not because native capture is unavailable. The Settings
+privacy page still offers `open_microphone_settings` (no inputs, `void` success),
+which opens the fixed Windows microphone privacy page. Failed opening returns
+`nativeFailure`; users must check microphone and desktop-app access in Windows
+and explicitly run a native test. Opening Privacy never starts capture.
+On Windows, empty `SoundSettings.inputDevice`, `outputDevice` and `ringDevice`
+select the current default **communications** endpoint in the respective
+direction, including ringtone playback. Explicit endpoint IDs persist; driver
+reinstallation can require reselection. See the [Windows physical acceptance
+matrix](../windows-audio-acceptance.md) for unverified hardware scenarios.
+
 Desktop/Rust controls and per-dialog DTO additions: [call controls and consultation](call-controls.md).
 
 Native menus, action search, shortcuts and window-event payloads:

@@ -38,8 +38,10 @@ SDP parsing, stronger jitter adaptation and retained initial source module/devic
 identity. The application keeps its adaptive 40–200 ms range and existing
 mute/hold/resume APIs. Upstream transmit-thread start/stop helpers are private and
 need no adapter calls. Custom close headers and optional AMR/ZRTP/WebRTC-AEC
-modules are not enabled without a product requirement. All eight local patches
-remain; only the NAT-test and call-control-header contexts needed rebasing.
+modules are not enabled without a product requirement. The eight existing patches
+remain; only the NAT-test and call-control-header contexts needed rebasing. A ninth
+patch now hardens WASAPI startup, stream recovery and error observation; see the
+[patch contracts](patches/README.md#wasapi-worker-lifetime-and-output-status).
 See the [behavioral contract](../docs/api/sip-events.md#native-sdk-413).
 
 Supported build hosts: macOS arm64, Windows MSVC x64; Linux x64/arm64 is available

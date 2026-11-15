@@ -16,6 +16,8 @@ export default async function settingsRegressions(
   await page.addInitScript(() => {
     window.isTauri = true;
     const scenario = new URLSearchParams(location.search).get("scenario");
+    if (scenario === "windows-audio")
+      Object.defineProperty(navigator, "platform", { value: "Win32" });
     const soundSettings: FixtureSnapshot["soundSettings"] = {
       inputDevice: "",
       outputDevice: "",
@@ -120,7 +122,8 @@ export default async function settingsRegressions(
       failDesktopSave: true,
       failTestNotification: false,
       failOpenNotificationSettings: false,
-      microphonePermission: "notDetermined",
+      microphonePermission:
+        scenario === "windows-audio" ? "unsupported" : "notDetermined",
       failMicrophoneRead: false,
       failMicrophoneRequest: false,
       failOpenMicrophoneSettings: false,
@@ -566,6 +569,67 @@ export default async function settingsRegressions(
       )
         throw new Error(
           "A BLF status update dirtied saved account configuration",
+        );
+    },
+  );
+  await check(
+    "Windows unsupported permission query preserves manual capture and OS settings guidance",
+    "windows-audio",
+    async () => {
+      await page
+        .getByRole("button", { name: "Datenschutz", exact: true })
+        .click();
+      await page
+        .locator(".permission-state")
+        .filter({ hasText: "Freigabe kann hier nicht abgefragt werden" })
+        .waitFor();
+      await page.getByText("Desktop-Apps", { exact: false }).waitFor();
+      if (
+        await page.evaluate(() =>
+          window.__settingsTest.commands.some(({ command }) =>
+            ["request_microphone_permission", "start_audio_test"].includes(
+              command,
+            ),
+          ),
+        )
+      )
+        throw Error(
+          "Opening Windows privacy settings prompted or captured audio",
+        );
+      await page
+        .locator(".permission-row")
+        .getByRole("button", {
+          name: "Systemeinstellungen öffnen",
+          exact: true,
+        })
+        .click();
+      if (
+        !(await page.evaluate(() =>
+          window.__settingsTest.commands.some(
+            ({ command }) => command === "open_microphone_settings",
+          ),
+        ))
+      )
+        throw Error(
+          "Windows microphone settings action did not reach native IPC",
+        );
+      await page.getByRole("button", { name: "Ton", exact: true }).click();
+      await page
+        .getByText("Standardkommunikationsgerät", { exact: false })
+        .waitFor();
+      await page
+        .getByRole("button", { name: "Mikrofon testen", exact: true })
+        .click();
+      await page.getByRole("meter").waitFor();
+      if (
+        !(await page.evaluate(() =>
+          window.__settingsTest.commands.some(
+            ({ command }) => command === "start_audio_test",
+          ),
+        ))
+      )
+        throw Error(
+          "Unsupported query incorrectly prevented explicit microphone test",
         );
     },
   );

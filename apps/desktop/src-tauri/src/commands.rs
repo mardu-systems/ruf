@@ -575,6 +575,7 @@ pub async fn request_microphone_permission() -> Result<phone_core::MicrophonePer
         .map_err(|_| window_error())?
 }
 /// Begin one bounded idle-only native audio test on the specified opaque endpoint.
+/// Lazily initializes the saved audio backend; no configured account is required.
 #[tauri::command]
 pub async fn start_audio_test(
     app: tauri::AppHandle,
@@ -582,18 +583,17 @@ pub async fn start_audio_test(
     device: String,
 ) -> Result<String, PhoneError> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::desktop::with_session(&app, |session| {
-            session.engine()?.start_audio_test(kind, &device)
-        })
+        crate::desktop::with_session(&app, |session| session.start_audio_test(kind, &device))
     })
     .await
     .map_err(|_| window_error())?
 }
 /// Stop only the owned test; stale IDs do not stop a replacement or a real call.
+/// A valid token succeeds without an engine; normal saved-account restoration still applies.
 #[tauri::command]
 pub async fn stop_audio_test(app: tauri::AppHandle, id: String) -> Result<(), PhoneError> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::desktop::with_session(&app, |session| session.engine()?.stop_audio_test(&id))
+        crate::desktop::with_session(&app, |session| session.stop_audio_test(&id))
     })
     .await
     .map_err(|_| window_error())?

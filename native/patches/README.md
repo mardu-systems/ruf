@@ -3,12 +3,47 @@
 ## Upstream 4.13 compatibility
 
 The exact 4.13.0 baresip/libre release commits are in `native/sources.json`.
-All eight ordered patches remain in the SDK identity. The NAT test registrations
+All nine ordered patches remain in the SDK identity. The NAT test registrations
 now retain upstream's `sip_transp_udp_sock` test, and the call-control header
 extension retains upstream's `call_set_close_headers` declaration. These are
 context changes only; local policy and control implementations are unchanged.
 Upstream provides the multipart-SDP bounds fix, RTP-padding removal, jitter
 adaptation and source-device retention without an additional local media patch.
+
+## WASAPI worker lifetime and output status
+
+`baresip-wasapi.patch` applies after `baresip-reliability.patch` on every SDK
+platform. Its complete contents follow that patch in the baresip SBOM hash and
+are required by Cargo's SDK validation. Rebuild an older SDK before using it.
+The build also stages the exact patched WASAPI `src.c`, `play.c`, `util.c` and
+`wasapi.h` in `test/wasapi` for the portable fault-injection harness.
+
+The additive `auplay.errorh` callback is optional and defaults to NULL through
+existing zero-initialized registration. `auplay_error(ap, st)`,
+`play_error(play)` and `audio_play_error(audio)` return a terminal backend errno,
+or zero for absent objects, absent player state, absent hooks or no reported
+failure. Call these getters on the native event loop while the owner is alive;
+a backend hook must safely read worker status without invoking application
+callbacks. Tone/file players retain their selected backend, including default
+selection, and call playback delegates through the existing audio receiver.
+These are native APIs only; no IPC DTO or existing function signature changes.
+
+WASAPI allocation acknowledges the actual `IAudioClient_Start` result. A five-second
+startup timeout and the worker compete through one atomic transition, so a
+cancelled worker cannot enter callbacks while its owner joins it. Source errors
+are observed by a native-loop timer; output errors are read through the optional
+status hooks. Destructors always join created workers, including exited workers,
+and release renderer/capture endpoint interfaces. An OS call that blocks can
+still delay cleanup; no driver cancellation guarantee is claimed.
+
+Active default streams check the communications-role endpoint every 250 ms.
+Device/resource invalidation and stopped audio services get a five-second recovery
+window with 100 ms between attempts; only successful buffer processing resets the
+window. Reopening a fixed selection retains its endpoint ID. Capture's SILENT
+flag supplies zeroed samples without dereferencing Windows' buffer pointer.
+The portable injected-COM harness compiles the staged production workers, including
+the startup-timeout race and repeated `ReleaseBuffer` invalidation regression;
+physical Windows qualification remains separate.
 
 ## SIP reliability patches
 

@@ -99,6 +99,7 @@ fn build_telephony() {
         ("baresipCallControls", "baresip-call-controls.patch"),
         ("reReliability", "re-reliability.patch"),
         ("baresipReliability", "baresip-reliability.patch"),
+        ("baresipWasapi", "baresip-wasapi.patch"),
     ] {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../native/patches")

@@ -10,6 +10,8 @@
   } from "../api";
   import ContactsSettings from "./ContactsSettings.svelte";
   import PermissionStatus from "./PermissionStatus.svelte";
+  const isWindows =
+    typeof navigator !== "undefined" && /Win/.test(navigator.platform);
   let status = $state<MicrophonePermission | null>(null),
     permissionError = $state<MessageValue | null>(null),
     actionError = $state<MessageValue | null>(null);
@@ -98,6 +100,12 @@
   working={requesting}
   error={$text(permissionError)}
   requestLabel={$t("settings.allow_microphone")}
+  unsupportedLabel={message(
+    isWindows
+      ? "settings.microphone_query_unsupported"
+      : "settings.unavailable",
+  )}
+  allowUnsupportedSettings={isWindows}
   oncheck={() => void check()}
   onrequest={() => void request()}
   onopen={isTauri() ? () => void open() : undefined}
@@ -108,6 +116,9 @@
 <p class="settings-footnote">
   {$t("settings.microphone_access_help")}
 </p>
+{#if isWindows}<p class="settings-footnote">
+    {$t("settings.windows_microphone_help")}
+  </p>{/if}
 <ContactsSettings embedded />
 <h2 class="settings-group sound-group">{$t("settings.local_data")}</h2>
 <div class="setting-row">

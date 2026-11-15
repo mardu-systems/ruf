@@ -1,5 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import {
   createSoftwareBill,
   addNative,
@@ -105,6 +106,7 @@ test("native SDK identity and linkage validation also run without an installed S
       baresipSecurity: "baresip security fixture",
       reReliability: "re reliability fixture",
       baresipReliability: "baresip reliability fixture",
+      baresipWasapi: "baresip WASAPI fixture",
     },
     modules: ["g711", "coreaudio"],
   };
@@ -122,6 +124,11 @@ test("native SDK identity and linkage validation also run without an installed S
       baresipCallControls: "changed controls fixture",
     },
   });
+  const changedWasapi = structuredClone(bill);
+  addNative(changedWasapi, context, {
+    ...sdk,
+    patches: { ...sdk.patches, baresipWasapi: "changed WASAPI fixture" },
+  });
   addNative(bill, context, sdk);
   const patchHash = (source: typeof bill, name: string) =>
     source.components
@@ -132,6 +139,23 @@ test("native SDK identity and linkage validation also run without an installed S
     patchHash(bill, "baresip"),
   );
   expect(patchHash(changedControls, "re")).toBe(patchHash(bill, "re"));
+  expect(patchHash(changedWasapi, "baresip")).not.toBe(
+    patchHash(bill, "baresip"),
+  );
+  expect(patchHash(changedWasapi, "re")).toBe(patchHash(bill, "re"));
+  expect(patchHash(bill, "baresip")).toBe(
+    createHash("sha256")
+      .update(
+        JSON.stringify([
+          sdk.patches.baresipReferPolicy,
+          sdk.patches.baresipCallControls,
+          sdk.patches.baresipSecurity,
+          sdk.patches.baresipReliability,
+          sdk.patches.baresipWasapi,
+        ]),
+      )
+      .digest("hex"),
+  );
   validateSoftwareBill(bill);
   expect(bill.components.find((item) => item.name === "openssl")?.version).toBe(
     "3.5.9",

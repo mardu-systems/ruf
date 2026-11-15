@@ -35,8 +35,22 @@ endif()
 
 add_executable(call_actions_test call_actions.c ../audio_diagnostics.c ../security.c ../blf.c)
 add_executable(blf_test blf_test.c)
+add_executable(audio_failures_test audio_failures.c ../audio_diagnostics.c ../security.c ../blf.c)
+add_executable(audio_player_status_test audio_player_status.c)
 add_executable(latency_probe ../latency_probe.c)
-foreach(test call_actions_test latency_probe blf_test)
+set(SIP_AUDIO_TESTS audio_failures_test audio_player_status_test)
+if(NOT WIN32)
+    # Compile the exact staged production workers with injected COM calls.
+    # Windows jobs compile the actual module against the real Windows SDK.
+    add_executable(wasapi_workers_test wasapi_workers.c)
+    target_include_directories(wasapi_workers_test BEFORE PRIVATE wasapi-stubs)
+    target_compile_definitions(wasapi_workers_test PRIVATE __MINGW32__
+        SIP_WASAPI_SRC="${SIP_SDK_PREFIX}/test/wasapi/src.c"
+        SIP_WASAPI_PLAY="${SIP_SDK_PREFIX}/test/wasapi/play.c"
+        SIP_WASAPI_UTIL="${SIP_SDK_PREFIX}/test/wasapi/util.c")
+    list(APPEND SIP_AUDIO_TESTS wasapi_workers_test)
+endif()
+foreach(test call_actions_test latency_probe blf_test ${SIP_AUDIO_TESTS})
     target_compile_features(${test} PRIVATE c_std_11)
     target_include_directories(${test} SYSTEM PRIVATE
         "${SIP_SDK_PREFIX}/include" "${SIP_SDK_PREFIX}/include/re")
