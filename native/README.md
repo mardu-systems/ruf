@@ -45,7 +45,7 @@ patch adds bounded PulseAudio startup and safe terminal-failure observation; see
 [patch contracts](patches/README.md#wasapi-worker-lifetime-and-output-status).
 See the [behavioral contract](../docs/api/sip-events.md#native-sdk-413).
 
-Supported build hosts: macOS arm64, Windows MSVC x64; Linux x64/arm64 is available
+Supported native build hosts: macOS ARM64/Intel and Windows MSVC x64; Linux x64/ARM64 is available
 for headless interoperability tests and the experimental Linux desktop foundation.
 See [Linux desktop prerequisites and acceptance](../docs/linux.md). Cross compilation is not implemented.
 
@@ -154,6 +154,8 @@ Account replacement with the same audio backend is supported only while idle.
 Native packages: `bun run desktop:build --features native --bundles app`
 on macOS, or `--bundles nsis` on Windows. CI selects explicit target triples.
 Without `native`, no SDK is needed and telephony reports `notLinked`.
+Linux native packages use `--bundles deb,rpm,appimage`; see the
+[platform matrix](../docs/platforms.md) for distro/CPU coverage.
 
 ## Selected functionality
 
@@ -261,3 +263,13 @@ cargo run --locked -p baresip-adapter --features native --example sound_smoke
 
 It queries real devices, routes to a selectable output, rejects an invalid device,
 and checks preview start/stop/completion. Windows execution is still required.
+
+## Intel macOS
+
+The pinned OpenSSL recipe supports both native macOS CPU families. ARM64 keeps
+`native/build/openssl-macos14/install`; Intel uses
+`native/build/openssl-macos14-x86_64/install` with `darwin64-x86_64-cc`. Select
+the matching `OPENSSL_ROOT_DIR` before the native build. CMake verifies archive
+CPU/deployment metadata, and the SDK builder requires the matching Rust host
+triple. Source pins, patches and macOS 14 minimum are identical. SDKs and SBOMs
+remain separate; a universal Rust target cannot substitute for a native SDK.

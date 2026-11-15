@@ -15,6 +15,10 @@ and [release checklist](../release-checklist.md).
 
 Linux platform work is recorded in [Linux desktop foundation, 15 November](2026-11-15-linux-foundation.md), including local ARM64 packages, service/failure tests and remaining x64/Wayland/hardware qualification.
 
+The [Linux/macOS architecture expansion, 15 November](2026-11-15-platform-architectures.md)
+records Intel macOS builds, the older Linux ARM64 package baseline, RPM/tray
+packaging and release validation for both CPU families.
+
 ## Detailed records retained
 
 | Record                                                                                    | Evidence and boundary                                                                                                                                                                                                                                                       |

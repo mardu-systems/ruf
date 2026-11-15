@@ -77,8 +77,8 @@ SIP and audio run natively through baresip. Original project code uses the
   A successful build does not replace testing on physical audio hardware or
   against your own telephone system. See the
   [verification records](docs/verification/README.md) for results and boundaries.
-- An **experimental Linux desktop foundation** adds Ubuntu 24.04 x64 DEB/AppImage
-  builds. See [Linux setup and remaining acceptance](docs/linux.md); it does not
+- An **experimental Linux desktop foundation** adds Ubuntu 22.04-baseline DEB/RPM/AppImage
+  builds for x64/ARM64, alongside Intel/Apple Silicon macOS builds. See [platform coverage](docs/platforms.md) and [Linux setup and remaining acceptance](docs/linux.md); it does not
   establish hardware, Wayland or provider qualification.
 - Default direct-distribution builds use ad hoc signing on macOS; Windows
   installers are unsigned. Local Developer ID signing is separately documented,

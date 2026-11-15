@@ -11,16 +11,16 @@ Setup does not push, tag or publish a release.
   The reusable `quality.yml` runs portable Linux checks for formatting, workflow
   syntax, versions, generated DTOs, frontend typecheck/build and portable Rust
   linting/tests, plus a separate browser-state regression job.
-- **Desktop build**: reusable workflow called by CI and release; macOS arm64 and
+- **Desktop build**: reusable workflow called by CI and release; macOS ARM64/Intel and Linux GNU x64/ARM64 plus
   Windows x64 build the pinned native SDK, run native workspace Clippy/tests and
-  produce DMG/NSIS artifacts with the native feature, plus each target’s compiled
+  produce target-specific installers with the native feature, plus each target’s compiled
   SBOM and build-hash manifest. A Linux Docker job verifies
   authenticated Asterisk calling and returned 440 Hz RTP audio. Hosted
   compilation does not qualify audio, hardware integration or SIP compatibility.
 - **Draft release**: a pushed `v<version>` tag must match package/Cargo versions.
   Versioned notes at `docs/releases/<version>.md` must exist. The same reusable
   quality checks as branch CI, all native jobs and the Asterisk interoperability
-  job must pass before a separate write-enabled job downloads this run's two
+  job must pass before a separate write-enabled job downloads this run's selected native
   installers and creates a **draft prerelease**. It does not publish.
   An existing release is not updated; correct/delete an obsolete draft explicitly
   before retrying draft creation. [0.1.1 notes](releases/0.1.1.md) describe this
@@ -143,14 +143,21 @@ checked installer/SBOM hashes for its stated revision.
 
 ## Experimental Linux desktop
 
-The desktop matrix also builds Ubuntu 24.04 x64 with `pulse` system audio and
-DEB/AppImage packaging. Linux prerequisites are installed before fingerprinting
+The desktop matrix builds Ubuntu 22.04 x64/ARM64 with `pulse` system audio and
+DEB/RPM/AppImage packaging; macOS jobs cover Apple Silicon and Intel separately. Linux prerequisites are installed before fingerprinting
 the SDK; compiler/image/OpenSSL/libpulse identity and all ten patches qualify
 its exact cache key. Linux uses distribution OpenSSL instead of the separate
 macOS/vcpkg cache. Headless Asterisk coverage remains separate.
 
 `bun run test:linux` exercises synthetic OS services on a private D-Bus/Xvfb
-session; it does not qualify physical audio or Wayland. Both Linux installers
+session; it does not qualify physical audio or Wayland. All Linux installers
 and their compiled inventory/hash evidence are uploaded under the Linux target.
-Release drafts require and attach the Linux packages alongside the existing
-macOS/Windows x64 artifacts. No release is published by these changes.
+Release drafts require and attach the Linux packages alongside
+both macOS architectures and Windows x64 artifacts. No release is published by these changes.
+
+The release collector (`bun scripts/release-artifacts.ts artifacts <tag>`) requires
+five native targets: both macOS CPUs, both Linux CPUs and Windows x64. It validates
+release version/context and every package/SBOM hash before emitting asset paths.
+Linux sidecars must agree across DEB/RPM/AppImage. Missing/mixed/tampered assets
+fail before draft creation. The SHA256SUMS file also covers the metadata assets.
+See [platform coverage](platforms.md) for compatibility and validation boundaries.

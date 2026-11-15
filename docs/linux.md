@@ -1,9 +1,9 @@
 # Linux desktop foundation
 
 Ruf has an experimental native Linux desktop target. The initial distribution
-baseline is Ubuntu 24.04 x64, with DEB and AppImage artifacts. Native Linux ARM64
-uses the same implementation and can be built locally; it is not a separate
-hosted release target. Build on the oldest distribution you intend to support.
+baseline is Ubuntu 22.04/glibc 2.35, with DEB, RPM and AppImage artifacts for
+both x64 and ARM64. Both architectures have native hosted build jobs. See the
+[platform matrix](platforms.md) for distribution and architecture boundaries. Build on the oldest distribution you intend to support.
 There is no cross-compilation in the SDK builder.
 
 ## Build
@@ -15,11 +15,11 @@ Install the pinned Bun and Rustup versions from `.bun-version` and
 sudo apt-get update
 sudo apt-get install build-essential git curl file cmake pkg-config libssl-dev libpulse-dev \
   libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
-  patchelf libfuse2t64
+  patchelf libfuse2
 bun install --frozen-lockfile
 bun run native:build
 bun run dev:native
-bun run desktop:build --features native --bundles deb,appimage
+bun run desktop:build --features native --bundles deb,rpm,appimage
 ```
 
 The SDK and desktop must use the same native architecture. A portable build
@@ -102,7 +102,7 @@ or join themselves, and teardown does not wait indefinitely to flush playback.
 Existing portable/native Rust tests, Clippy, frontend/UI checks and generated DTO
 verification remain required. The Linux desktop workflow builds the SDK before
 native checks and preserves separate Asterisk interoperability coverage. Build
-hash manifests and compiled SBOMs accompany both installer formats.
+hash manifests and compiled SBOMs accompany all three installer formats.
 
 ## Manual release acceptance
 
