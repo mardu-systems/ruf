@@ -26,6 +26,8 @@ pub(crate) struct EngineState {
     pub(crate) terminal_call_errors: BTreeMap<u64, PhoneError>,
     pub(crate) call_generation: u64,
     pub(crate) call_journal: crate::call_journal::CallJournal,
+    #[cfg(feature = "native")]
+    pub(crate) blf_dialogs: BTreeMap<(u32, String), crate::blf::DialogInfo>,
     next_account_id: u32,
     pub(crate) pending_accounts: BTreeMap<u32, Option<AccountSnapshot>>,
     pub(crate) account_results: BTreeMap<u32, Result<(), PhoneError>>,
@@ -415,10 +417,15 @@ impl Engine {
             Some(if enabled { "1" } else { "0" }),
             0,
         )?;
+        #[cfg(feature = "native")]
+        state
+            .blf_dialogs
+            .retain(|(account_id, _), _| *account_id != id);
         let previous = state.snapshot.accounts.iter().find(|a| a.id == id).cloned();
         state.pending_accounts.insert(id, previous);
         state.account_results.remove(&id);
         let account = AccountSnapshot {
+            monitored_extensions: config.monitored_extensions.iter().map(Into::into).collect(),
             transport: config.transport,
             media_security: config.media_security,
             auth_username: config.auth_username.clone(),
@@ -508,6 +515,9 @@ impl Engine {
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or_else(state_error)?;
+            for target in &mut account.monitored_extensions {
+                target.state = phone_core::ExtensionState::Unknown;
+            }
             account.enabled = enabled;
             account.enabled_changing = true;
             account.registration = if enabled {
@@ -614,6 +624,7 @@ impl Engine {
             .ok_or_else(state_error)?;
         let id = state.next_account_id;
         state.snapshot.accounts.push(AccountSnapshot {
+            monitored_extensions: config.monitored_extensions.iter().map(Into::into).collect(),
             transport: config.transport,
             media_security: config.media_security,
             auth_username: config.auth_username.clone(),
@@ -1064,6 +1075,7 @@ mod interop_tests {
         })));
         engine
             .configure_account(&AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1143,6 +1155,7 @@ mod interop_tests {
         )
         .unwrap();
         let account = AccountConfig {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,
@@ -1202,6 +1215,7 @@ mod interop_tests {
         .unwrap();
         engine
             .configure_account(&AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1257,6 +1271,7 @@ mod interop_tests {
         )
         .unwrap();
         let account = AccountConfig {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,
@@ -1326,6 +1341,7 @@ mod interop_tests {
         .unwrap();
         for username in ["1001", "1002"] {
             let account = AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1372,6 +1388,7 @@ mod interop_tests {
                 let before = engine.snapshot().unwrap().accounts[0].clone();
                 engine.snapshot.lock().unwrap().snapshot.call = CallState::Idle;
                 let replacement = AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1450,6 +1467,7 @@ mod interop_tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let account = AccountConfig {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,

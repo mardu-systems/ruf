@@ -24,7 +24,7 @@ def header(message,name):
 def serve(raw):
     global active_invite
     try:
-        sock=raw if mode=='tcp' else context.wrap_socket(raw,server_side=True);log('CONNECTED' if mode=='tcp' else 'HANDSHAKE');pending=b''; incoming_sent=False; invites={}; dialog=None; rekey_sent=False
+        sock=raw if mode in ('tcp','blf-tcp') else context.wrap_socket(raw,server_side=True);log('CONNECTED' if mode in ('tcp','blf-tcp') else 'HANDSHAKE');pending=b''; incoming_sent=False; invites={}; dialog=None; rekey_sent=False
         if mode.startswith('rekey-'):sock.settimeout(0.05)
         while True:
             if mode in ('rekey-offer','rekey-ack','rekey-codec','rekey-proto') and dialog and not rekey_sent and (root/'rekey').exists():
@@ -70,6 +70,18 @@ def serve(raw):
                     answer=f'v=0\r\no=fixture 1 2 IN IP4 127.0.0.1\r\ns=fixture\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio {rtpport} RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n' if mode=='rekey-ack' else ''
                     ack=f'ACK {target} SIP/2.0\r\nVia: SIP/2.0/TLS 127.0.0.1:{port};branch=z9hG4bK-rekey-ack\r\nFrom: {header(message,"From")}\r\nTo: {header(message,"To")}\r\nCall-ID: {header(message,"Call-ID")}\r\nCSeq: 999 ACK\r\nContent-Type: application/sdp\r\nContent-Length: {len(answer)}\r\n\r\n{answer}'
                     sock.sendall(ack.encode());log(f'REKEY_ACK_SENT|{header(message,"Call-ID")}|999 ACK');continue
+                if method=='SUBSCRIBE' and mode in ('blf-tcp','blf-tls'):
+                    to=header(message,'To');to=to if ';tag=' in to else to+';tag=tls-peer'
+                    contact=f'<sip:peer@127.0.0.1:{port}>'
+                    response=f'SIP/2.0 200 OK\r\nVia: {header(message,"Via")}\r\nFrom: {header(message,"From")}\r\nTo: {to}\r\nCall-ID: {header(message,"Call-ID")}\r\nCSeq: {header(message,"CSeq")}\r\nContact: {contact}\r\nExpires: 60\r\nContent-Length: 0\r\n\r\n'
+                    sock.sendall(response.encode())
+                    if header(message,'Expires')!='0':
+                        target=header(message,'Contact').split('<')[1].split('>')[0]
+                        body='<dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" version="0" state="full" entity="sip:200@localhost"><dialog id="a"><state>confirmed</state></dialog></dialog-info>'
+                        transport='TCP' if mode=='blf-tcp' else 'TLS'
+                        notify=f'NOTIFY {target} SIP/2.0\r\nVia: SIP/2.0/{transport} 127.0.0.1:{port};branch=z9hG4bK-blf\r\nMax-Forwards: 70\r\nFrom: {to}\r\nTo: {header(message,"From")}\r\nCall-ID: {header(message,"Call-ID")}\r\nCSeq: 1 NOTIFY\r\nContact: {contact}\r\nEvent: dialog\r\nSubscription-State: active;expires=60\r\nContent-Type: application/dialog-info+xml\r\nContent-Length: {len(body)}\r\n\r\n{body}'
+                        sock.sendall(notify.encode())
+                    continue
                 if method=='ACK':continue
                 if method not in ('REGISTER','INVITE','BYE','INFO','REFER','OPTIONS'):continue
                 to=header(message,'To');to=to if ';tag=' in to else to+';tag=tls-peer'

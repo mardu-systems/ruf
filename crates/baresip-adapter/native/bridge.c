@@ -7,6 +7,7 @@
 #include "audio_devices.h"
 #include "audio_diagnostics.h"
 #include "network_roam.h"
+#include "blf.h"
 #include "security.h"
 #include <re.h>
 #include <rem.h>
@@ -39,7 +40,7 @@ struct sip_event {
 typedef void (*event_callback)(const struct sip_event *event, void *arg);
 enum { EV_READY=1, EV_REGISTERING, EV_REGISTERED, EV_REG_FAILED,
        EV_CALLING, EV_RINGING, EV_INCOMING, EV_ACTIVE, EV_CLOSED, EV_ERROR, EV_STOPPED, EV_STALE, EV_REMOVED, EV_REMOVE_FAILED, EV_ACCOUNT_APPLIED, EV_ACCOUNT_REJECTED, EV_AUDIO_APPLIED, EV_AUDIO_FAILED, EV_RING_STARTED, EV_RING_STOPPED, EV_ANSWER_FAILED, EV_BUSY_INCOMING, EV_DIAL_STARTED, EV_DIAL_FAILED, EV_LOCAL_END, EV_INTERRUPTING,
-       EV_PROGRESS, EV_HOLD, EV_RESUME, EV_DTMF_START, EV_DTMF_END, EV_TRANSFER_FAILED, EV_REDIRECT, EV_ANSWER_CLOSED, EV_TEST_STARTED, EV_TEST_LEVEL, EV_TEST_STOPPED, EV_TEST_FAILED, EV_SELECTED, EV_MUTED, EV_LOCAL_HOLD_PENDING, EV_LOCAL_HOLD_DONE, EV_CONTROL_FAILED, EV_TRANSFER_PENDING, EV_TRANSFER_RESULT, EV_CONTROL_REJECTED, EV_RECOVERY_FAILED, EV_RECOVERING, EV_CONSULT_FAILED, EV_CALL_ERROR, EV_SECURITY };
+       EV_PROGRESS, EV_HOLD, EV_RESUME, EV_DTMF_START, EV_DTMF_END, EV_TRANSFER_FAILED, EV_REDIRECT, EV_ANSWER_CLOSED, EV_TEST_STARTED, EV_TEST_LEVEL, EV_TEST_STOPPED, EV_TEST_FAILED, EV_SELECTED, EV_MUTED, EV_LOCAL_HOLD_PENDING, EV_LOCAL_HOLD_DONE, EV_CONTROL_FAILED, EV_TRANSFER_PENDING, EV_TRANSFER_RESULT, EV_CONTROL_REJECTED, EV_RECOVERY_FAILED, EV_RECOVERING, EV_CONSULT_FAILED, EV_CALL_ERROR, EV_SECURITY, EV_BLF_NOTIFY, EV_BLF_UNKNOWN };
 enum { OP_ACCOUNT=1, OP_DIAL, OP_ANSWER, OP_HANGUP, OP_STOP, OP_REMOVE, OP_SOUND, OP_PREVIEW, OP_PREVIEW_STOP, OP_SOUND_RESTORE, OP_REJECT, OP_TEST_MIC, OP_TEST_SPEAKER, OP_TEST_STOP, OP_DISABLE, OP_ENABLE, OP_MUTE, OP_HOLD, OP_TRANSFER, OP_CONSULT, OP_SWITCH, OP_CANCEL_CONSULT, OP_COMPLETE_TRANSFER, OP_DTMF };
 
 struct request {
@@ -47,12 +48,13 @@ struct request {
     int operation;
     uint32_t account_id;
     uint64_t call_generation;
-    char *registrar, *username, *password, *destination, *auth_username, *outbound_proxy;
+    char *registrar, *username, *password, *destination, *auth_username, *outbound_proxy, *monitored_extensions;
     int transport, media_security;
 };
 struct sip_account {
     uint32_t id;
     struct ua *ua;
+    struct sip_blf *blf;
     char registrar[256], next_hop[256];
     int transport, media_security;
 };
@@ -107,6 +109,7 @@ struct engine {
     char input_device[128], output_device[128], ring_device[128];
     struct play *ring;
     event_callback callback;
+    int (*blf_callback)(const struct sip_event *, void *);
     void *callback_arg;
 };
 
@@ -437,7 +440,7 @@ static void free_request(struct request *r) {
         size_t n = strlen(r->password);
         while (n--) *p++ = 0;
     }
-    free(r->auth_username); free(r->outbound_proxy); free(r->registrar); free(r->username); free(r->password); free(r->destination); free(r);
+    free(r->monitored_extensions); free(r->auth_username); free(r->outbound_proxy); free(r->registrar); free(r->username); free(r->password); free(r->destination); free(r);
 }
 static void remove_pending(struct engine *e, struct request *r) {
     struct request **p = &e->pending;
@@ -456,7 +459,10 @@ static void shutdown_tick(void *arg) {
 
 static void network_tick(void *arg) {
     struct engine *e = arg;
+    unsigned generation = sip_network_generation();
     (void)sip_network_poll(e->current->call != NULL);
+    if (generation != sip_network_generation())
+        for (size_t i = 0; i < 8; ++i) sip_blf_suspend(e->accounts[i].blf);
     tmr_start(&e->network_timer, 5000, network_tick, e);
 }
 
@@ -574,6 +580,13 @@ static void emit_security(struct engine *e, const struct sip_account *account, s
 }
 #include "call_controls.h"
 
+static int blf_observed(uint32_t account_id, const char *extension, const char *body, void *arg) {
+    struct engine *e = arg;
+    if (!e->blf_callback) return 0;
+    const struct sip_event event = { body ? EV_BLF_NOTIFY : EV_BLF_UNKNOWN, 0, account_id, 0, NULL, extension, body };
+    return e->blf_callback(&event, e->callback_arg);
+}
+
 static void event_handler(enum bevent_ev kind, struct bevent *event, void *arg) {
     struct engine *e = arg;
     struct call *call = bevent_get_call(event);
@@ -593,8 +606,11 @@ static void event_handler(enum bevent_ev kind, struct bevent *event, void *arg) 
             emit_busy_offer(e, message, account->id);
         break;
     case BEVENT_REGISTERING: emit_account(e, EV_REGISTERING, 0, account->id); break;
-    case BEVENT_REGISTER_OK: emit_account(e, EV_REGISTERED, 0, account->id); break;
-    case BEVENT_REGISTER_FAIL: emit_account(e, EV_REG_FAILED, ua_registration_error(ua) ? security_error(account, ua_registration_error(ua)) : event_status(bevent_get_text(event), ' '), account->id); break;
+    case BEVENT_REGISTER_OK:
+        emit_account(e, EV_REGISTERED, 0, account->id);
+        sip_blf_registered(account->blf);
+        break;
+    case BEVENT_REGISTER_FAIL: sip_blf_suspend(account->blf); emit_account(e, EV_REG_FAILED, ua_registration_error(ua) ? security_error(account, ua_registration_error(ua)) : event_status(bevent_get_text(event), ' '), account->id); break;
     case BEVENT_CALL_INCOMING:
         if (account->transport == 2 && call_transp(call) != SIP_TRANSP_TLS) { ua_hangup(ua, call, 488, "TLS Required"); break; }
         stop_audio_test(e);
@@ -723,6 +739,7 @@ static void queue_handler(int id, void *data, void *arg) {
     case OP_ACCOUNT:
     case OP_ENABLE: {
         struct ua *replacement = NULL;
+        struct sip_blf *replacement_blf = NULL;
         if (e->current->call) { error = EBUSY; break; }
         retire_transfer(e);
         if (!account) {
@@ -731,6 +748,7 @@ static void queue_handler(int id, void *data, void *arg) {
         if (!account) { error = ENOSPC; break; }
         if (r->operation == OP_ACCOUNT && !strcmp(r->destination, "0")) {
             struct ua *previous = account->ua;
+            account->blf = mem_deref(account->blf);
             account->ua = NULL;
             account->id = r->account_id;
             str_ncpy(account->registrar, r->registrar, sizeof(account->registrar));
@@ -754,23 +772,28 @@ static void queue_handler(int id, void *data, void *arg) {
             snprintf(proxy, sizeof(proxy), "sip:%s;transport=%s", r->outbound_proxy, transport_name(r->transport));
             error = account_set_outbound(ua_account(replacement), proxy, 0);
         }
-        if (error) { mem_deref(replacement); break; }
+        if (!error) error = sip_blf_alloc(&replacement_blf, replacement, r->account_id,
+            r->registrar, r->transport, r->monitored_extensions ? r->monitored_extensions : "", blf_observed, e);
+        if (error) { mem_deref(replacement_blf); mem_deref(replacement); break; }
         struct ua *previous = account->ua;
         struct sip_account previous_config = *account;
         account->ua = NULL;
         account->id = r->account_id;
         account->ua = replacement;
+        account->blf = replacement_blf;
         account->transport = r->transport; account->media_security = r->media_security;
         str_ncpy(account->next_hop, r->outbound_proxy[0] ? r->outbound_proxy : r->registrar, sizeof(account->next_hop));
         str_ncpy(account->registrar, r->registrar, sizeof(account->registrar));
         error = ua_register(replacement);
         if (error) {
             *account = previous_config;
+            mem_deref(replacement_blf);
             mem_deref(replacement);
             if (!previous) memset(account, 0, sizeof(*account));
         } else {
             /* The UA destructor retires pending REGISTER before unregistering.
                An explicit ua_unregister would overlap the owned request. */
+            mem_deref(previous_config.blf);
             mem_deref(previous);
             emit_account(e, EV_ACCOUNT_APPLIED, 0, r->account_id);
         }
@@ -781,6 +804,7 @@ static void queue_handler(int id, void *data, void *arg) {
         retire_transfer(e);
         if (account) {
             struct ua *previous = account->ua;
+            account->blf = mem_deref(account->blf);
             account->ua = NULL;
             mem_deref(previous);
         }
@@ -791,6 +815,7 @@ static void queue_handler(int id, void *data, void *arg) {
         retire_transfer(e);
         if (account) {
             struct ua *previous = account->ua;
+            account->blf = mem_deref(account->blf);
             memset(account, 0, sizeof(*account));
             mem_deref(previous);
         }
@@ -914,6 +939,11 @@ void *sip_engine_create(event_callback callback, void *arg, int audio_mode, cons
     return e;
 }
 
+void sip_engine_set_blf_callback(void *handle, int (*callback)(const struct sip_event *, void *)) {
+    struct engine *e = handle;
+    if (e && !e->running) e->blf_callback = callback;
+}
+
 int sip_engine_run(void *handle) {
     struct engine *e = handle;
     /* Create incoming call objects without the upstream menu module. This does
@@ -1020,6 +1050,7 @@ int sip_engine_run(void *handle) {
         stop_ring(e);
         bevent_unregister(event_handler);
         e->current->call = NULL; e->current->ua = NULL;
+        for (size_t i = 0; i < 8; ++i) e->accounts[i].blf = mem_deref(e->accounts[i].blf);
         memset(e->accounts, 0, sizeof(e->accounts));
         ua_close();
         module_app_unload();
@@ -1034,7 +1065,7 @@ int sip_engine_run(void *handle) {
 }
 
 int sip_engine_request(void *handle, int operation, uint32_t account_id, uint64_t call_generation, const char *registrar,
-                       const char *username, const char *password, const char *destination, int transport, int media_security, const char *auth_username, const char *outbound_proxy) {
+                       const char *username, const char *password, const char *destination, int transport, int media_security, const char *auth_username, const char *outbound_proxy, const char *monitored_extensions) {
     struct engine *e = handle;
     struct request *r;
     int error;
@@ -1043,16 +1074,18 @@ int sip_engine_request(void *handle, int operation, uint32_t account_id, uint64_
         LOCK(&e->lock); e->stop_requested = true; UNLOCK(&e->lock);
         return 0;
     }
+    if (sip_blf_validate_targets(monitored_extensions ? monitored_extensions : "")) return EINVAL;
     r = calloc(1, sizeof(*r));
     if (!r) return ENOMEM;
     r->transport = transport; r->media_security = media_security;
     r->auth_username = copy_string(auth_username); r->outbound_proxy = copy_string(outbound_proxy);
+    r->monitored_extensions = copy_string(monitored_extensions);
     r->operation = operation;
     r->account_id = account_id;
     r->call_generation = call_generation;
     r->registrar = copy_string(registrar); r->username = copy_string(username);
     r->password = copy_string(password); r->destination = copy_string(destination);
-    if (!r->registrar || !r->username || !r->password || !r->destination || !r->auth_username || !r->outbound_proxy) { free_request(r); return ENOMEM; }
+    if (!r->registrar || !r->username || !r->password || !r->destination || !r->auth_username || !r->outbound_proxy || !r->monitored_extensions) { free_request(r); return ENOMEM; }
     LOCK(&e->lock);
     for (struct request *p = e->pending; p; p = p->next) ++pending;
     if (!e->running || e->stop_requested) error = ENOTCONN;

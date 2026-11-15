@@ -288,6 +288,7 @@ dependencies = [
  "cc",
  "libc",
  "phone-core",
+ "quick-xml",
  "serde_json",
  "windows",
  "windows-core",

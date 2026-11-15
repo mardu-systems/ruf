@@ -145,6 +145,9 @@ pub struct CallSecurity {
 #[derive(Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountConfig {
+    /// Optional account-scoped BLF targets; omitted legacy input defaults to none.
+    #[serde(default)]
+    pub monitored_extensions: Vec<crate::MonitoredExtension>,
     /// DNS name or IPv4 registrar, optionally with a nonzero port.
     pub registrar: String,
     /// SIP address username; also the default digest username.
@@ -407,6 +410,8 @@ pub struct CallEvent {
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSnapshot {
+    /// Saved BLF targets and their ephemeral native observations.
+    pub monitored_extensions: Vec<crate::MonitoredExtensionSnapshot>,
     /// Stable, nonzero identity within this engine session.
     pub id: u32,
     /// User-visible account name, 1–64 Unicode characters.
@@ -650,6 +655,7 @@ impl AccountConfig {
                 "Password must be nonempty, at most 1024 bytes and contain no NUL byte.",
             ));
         }
+        crate::validate_monitored_extensions(&self.monitored_extensions)?;
         Ok(())
     }
 }

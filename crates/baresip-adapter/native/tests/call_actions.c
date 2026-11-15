@@ -20,6 +20,7 @@ int sip_audio_device_available(const char *id, int input) {
     return 0;
 }
 void sip_network_reset(void) {}
+unsigned sip_network_generation(void) { return 0; }
 int sip_network_poll(bool active) { (void)active; return 0; }
 
 static void ring_destroyed(void *arg) { (void)arg; ++ring_destructions; }

@@ -261,10 +261,24 @@ export default async function callControls(
           const {
             password: _secret,
             audioMode: _mode,
+            monitoredExtensions,
             ...safe
           } = args.account!;
-          if (saved) Object.assign(saved, safe, { name: args.name });
-          else state.accounts.push({ ...account(3, args.name!), ...safe });
+          const monitored = monitoredExtensions.map((target) => ({
+            ...target,
+            state: "unknown" as const,
+          }));
+          if (saved)
+            Object.assign(saved, safe, {
+              name: args.name,
+              monitoredExtensions: monitored,
+            });
+          else
+            state.accounts.push({
+              ...account(3, args.name!),
+              ...safe,
+              monitoredExtensions: monitored,
+            });
           state.revision++;
           return structuredClone(state);
         }

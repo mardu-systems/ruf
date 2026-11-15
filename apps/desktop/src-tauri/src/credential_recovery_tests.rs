@@ -83,6 +83,7 @@ impl Fixture {
         let key = "abcd-1234".to_owned();
         let saved = SavedSettings {
             accounts: vec![SavedAccount {
+                monitored_extensions: Vec::new(),
                 transport: if secure {
                     phone_core::SipTransport::Tls
                 } else {
@@ -274,6 +275,7 @@ fn saved_account_accepts_first_incoming_call_after_each_restart() {
     store
         .write(&SavedSettings {
             accounts: vec![SavedAccount {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -498,6 +500,7 @@ fn failed_removal_restores_the_outgoing_account_selection() {
         .state
         .with(|session| {
             let saved = SavedAccount {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -511,6 +514,7 @@ fn failed_removal_restores_the_outgoing_account_selection() {
             let id = session.engine()?.restore_unavailable_account(
                 &saved.name,
                 &AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -587,6 +591,7 @@ fn invalid_saved_password_does_not_discard_other_restored_accounts() {
             accounts: [("abcd-1111", "broken"), ("abcd-2222", "valid")]
                 .into_iter()
                 .map(|(key, username)| SavedAccount {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,

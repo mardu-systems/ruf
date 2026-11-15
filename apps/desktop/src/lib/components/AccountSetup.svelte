@@ -36,6 +36,23 @@
   let nameError = $state<MessageValue>("");
   let form: HTMLFormElement;
   let confirmRemove = $state(false);
+  function addExtension() {
+    const targets = account.monitoredExtensions ?? [];
+    if (targets.length >= 32) return;
+    account.monitoredExtensions = [...targets, { extension: "", name: "" }];
+    void tick().then(() =>
+      document.getElementById(`blf-extension-${targets.length}`)?.focus(),
+    );
+  }
+  function removeExtension(index: number) {
+    account.monitoredExtensions = (account.monitoredExtensions ?? []).filter(
+      (_, targetIndex) => targetIndex !== index,
+    );
+    delete errors.monitoredExtensions;
+    void tick().then(() =>
+      document.getElementById("monitored-extensions")?.focus(),
+    );
+  }
   const missingCredential = $derived(
     existing?.lastError?.code === "credentialMissing",
   );
@@ -351,6 +368,68 @@
         </div>
       </div>
     </details>
+    <svelte:element this={embedded ? "h3" : "h2"} class="settings-group"
+      >{$t("settings.blf_title")}</svelte:element
+    >
+    <p id="blf-help" class="settings-trust-note">{$t("settings.blf_help")}</p>
+    {#each account.monitoredExtensions ?? [] as target, index}
+      <div class="setting-row blf-editor-row">
+        <div class="setting-control">
+          <label for={`blf-extension-${index}`}>
+            {$t("settings.blf_extension", { index: index + 1 })}
+          </label>
+          <input
+            id={`blf-extension-${index}`}
+            name={index === 0 ? "monitoredExtensions" : `blfExtension${index}`}
+            bind:value={target.extension}
+            inputmode="numeric"
+            maxlength="32"
+            autocomplete="off"
+            spellcheck="false"
+            aria-invalid={!!errors.monitoredExtensions}
+            aria-describedby={errors.monitoredExtensions
+              ? "blf-error"
+              : "blf-help"}
+          />
+        </div>
+        <div class="setting-control">
+          <label for={`blf-name-${index}`}>
+            {$t("settings.blf_name", { index: index + 1 })}
+          </label>
+          <input
+            id={`blf-name-${index}`}
+            bind:value={target.name}
+            autocomplete="off"
+            spellcheck="false"
+            aria-invalid={!!errors.monitoredExtensions}
+            aria-describedby={errors.monitoredExtensions
+              ? "blf-error"
+              : "blf-help"}
+          />
+        </div>
+        <button
+          class="text-button"
+          type="button"
+          aria-label={$t("settings.blf_remove", { index: index + 1 })}
+          onclick={() => removeExtension(index)}
+          >{$t("settings.blf_remove_short")}</button
+        >
+      </div>
+    {/each}
+    {#if errors.monitoredExtensions}<p
+        id="blf-error"
+        class="field-error"
+        role="alert"
+      >
+        {$text(errors.monitoredExtensions)}
+      </p>{/if}
+    <button
+      id="monitored-extensions"
+      class="secondary-button blf-add"
+      type="button"
+      disabled={(account.monitoredExtensions?.length ?? 0) >= 32}
+      onclick={addExtension}>{$t("settings.blf_add")}</button
+    >
     <div class="settings-form-actions settings-save-bar">
       <p>{$t("settings.apply_on_save")}</p>
       <button class="primary-button" type="submit"
@@ -391,3 +470,32 @@
         >{$t("settings.remove_account_action")}</button
       >{/if}
   </div>{/if}
+
+<style>
+  .blf-editor-row {
+    grid-template-columns: minmax(80px, 1fr) minmax(120px, 1.5fr) auto;
+    gap: 12px;
+    align-items: end;
+  }
+  .blf-editor-row label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  .blf-editor-row button {
+    min-height: 28px;
+  }
+  .blf-add {
+    margin: 12px 0;
+  }
+  @media (max-width: 500px) {
+    .blf-editor-row {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .blf-editor-row button {
+      grid-column: 1 / -1;
+      justify-self: end;
+    }
+  }
+</style>

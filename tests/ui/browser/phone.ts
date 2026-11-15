@@ -304,6 +304,156 @@ export default async function phoneRegressions(
   }
   await page.setViewportSize({ width: 340, height: 500 });
   await check(
+    "32 BLF targets and the call button remain reachable at minimum window size",
+    async () => {
+      await page.setViewportSize({ width: 320, height: 440 });
+      await fresh();
+      await page.evaluate(() => {
+        const fixture = window.__phoneFixture;
+        fixture.state.accounts[0]!.monitoredExtensions = Array.from(
+          { length: 32 },
+          (_, index) => ({
+            extension: String(1000 + index),
+            name: "W".repeat(64),
+            state: "unknown" as const,
+          }),
+        );
+        fixture.emit();
+      });
+      const last = page
+        .locator(".monitored-extensions li")
+        .last()
+        .getByRole("button");
+      await last.scrollIntoViewIfNeeded();
+      await last.focus();
+      const reachable = await last.evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return (
+          bounds.left >= 0 &&
+          bounds.right <= innerWidth &&
+          bounds.top >= 0 &&
+          bounds.bottom <= innerHeight &&
+          hit !== null &&
+          button.contains(hit)
+        );
+      });
+      if (!reachable)
+        throw new Error(
+          "Last BLF target is clipped or overflows the compact phone",
+        );
+      const call = page.getByRole("button", { name: "Anrufen", exact: true });
+      await call.scrollIntoViewIfNeeded();
+      if (!(await call.isVisible()))
+        throw new Error("BLF list hid the call button");
+      await last.click();
+      const hangup = page.getByRole("button", {
+        name: "Auflegen",
+        exact: true,
+      });
+      await hangup.scrollIntoViewIfNeeded();
+      const hangupReachable = await hangup.evaluate((button) => {
+        const bounds = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit !== null && button.contains(hit);
+      });
+      if (!hangupReachable)
+        throw new Error("32 BLF targets hid the active call controls");
+      await hangup.click();
+      await page.setViewportSize({ width: 340, height: 500 });
+    },
+  );
+  await check(
+    "BLF live updates show per-extension state and call through the existing guard",
+    async () => {
+      await fresh();
+      await page.evaluate(() => {
+        const fixture = window.__phoneFixture;
+        fixture.state.accounts[0]!.monitoredExtensions = [
+          { extension: "1001", name: "Empfang", state: "idle" },
+          { extension: "1002", name: "Büro", state: "unknown" },
+        ];
+        fixture.emit();
+      });
+      await page
+        .getByRole("button", {
+          name: "Empfang anrufen, Nebenstelle 1001, Frei",
+          exact: true,
+        })
+        .waitFor();
+      await page.evaluate(() => {
+        const fixture = window.__phoneFixture;
+        fixture.state.accounts[0]!.monitoredExtensions![0]!.state = "ringing";
+        fixture.emit();
+      });
+      await page
+        .getByRole("button", {
+          name: "Empfang anrufen, Nebenstelle 1001, Klingelt",
+          exact: true,
+        })
+        .waitFor();
+      if (_capture) {
+        await page
+          .locator(".monitored-extensions li")
+          .last()
+          .scrollIntoViewIfNeeded();
+        await page.screenshot({ path: "output/playwright/blf-phone.png" });
+      }
+      await page
+        .getByRole("button", {
+          name: "Büro anrufen, Nebenstelle 1002, Unbekannt",
+          exact: true,
+        })
+        .click();
+      await page.getByRole("heading", { name: "1002", exact: true }).waitFor();
+      const dial = await page.evaluate(() =>
+        window.__phoneFixture.commands
+          .slice()
+          .reverse()
+          .find((item) => item.command === "dial"),
+      );
+      if (dial?.args.destination !== "1002")
+        throw new Error("BLF call lost its extension");
+      if (
+        !(await page
+          .getByRole("button", {
+            name: "Empfang anrufen, Nebenstelle 1001, Klingelt",
+            exact: true,
+          })
+          .isDisabled())
+      )
+        throw new Error("BLF calling was not disabled during an active call");
+      await page.getByRole("button", { name: "Auflegen", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Anrufen", exact: true })
+        .waitFor();
+      await page.evaluate(() => {
+        const fixture = window.__phoneFixture;
+        fixture.state.registration = "failed";
+        fixture.state.accounts[0]!.registration = "failed";
+        fixture.emit();
+      });
+      const monitored = page.getByRole("button", {
+        name: "Empfang anrufen, Nebenstelle 1001, Klingelt",
+        exact: true,
+      });
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            '[aria-label="Empfang anrufen, Nebenstelle 1001, Klingelt"]',
+          )?.disabled,
+      );
+      if (!(await monitored.isDisabled()))
+        throw new Error("Unregistered BLF call remained enabled");
+    },
+  );
+  await check(
     "notification hint refreshes independently and links to notification settings without prompts",
     async () => {
       await fresh("?snapshot-error");

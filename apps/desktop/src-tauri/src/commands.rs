@@ -717,6 +717,7 @@ mod diagnostic_tests {
                 number: Some("+4930555000".into()),
             }),
             accounts: vec![phone_core::AccountSnapshot {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,

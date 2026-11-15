@@ -6,6 +6,7 @@ use phone_core::{
 
 fn account() -> AccountConfig {
     AccountConfig {
+        monitored_extensions: Vec::new(),
         transport: Default::default(),
         media_security: Default::default(),
         auth_username: None,
@@ -101,6 +102,7 @@ fn multiple_accounts() -> EngineSnapshot {
     EngineSnapshot {
         accounts: vec![
             AccountSnapshot {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -117,6 +119,7 @@ fn multiple_accounts() -> EngineSnapshot {
                 registered_at_ms: None,
             },
             AccountSnapshot {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,

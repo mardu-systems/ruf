@@ -159,6 +159,7 @@ test("account security validates TLS requirement and optional structured fields"
     mediaSecurity: "required" as const,
     authUsername: null,
     outboundProxy: null,
+    monitoredExtensions: [],
   };
   expect(validateAccount(account)).toHaveProperty("mediaSecurity");
   const normalized = normalizeAccount({
@@ -215,6 +216,7 @@ test("single dialog names its owner independently of outgoing selection", () => 
           mediaSecurity: "required",
           authUsername: null,
           outboundProxy: null,
+          monitoredExtensions: [],
         },
       ],
       elapsed: "00:01",

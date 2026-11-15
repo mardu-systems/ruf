@@ -19,10 +19,13 @@ import type {
 // Legacy scenarios deliberately omit newer snapshot fields to exercise compatibility.
 export type FixtureAccount = Omit<
   AccountSnapshot,
-  "enabled" | "enabledChanging" | "registeredAtMs"
+  "enabled" | "enabledChanging" | "registeredAtMs" | "monitoredExtensions"
 > &
   Partial<
-    Pick<AccountSnapshot, "enabled" | "enabledChanging" | "registeredAtMs">
+    Pick<
+      AccountSnapshot,
+      "enabled" | "enabledChanging" | "registeredAtMs" | "monitoredExtensions"
+    >
   >;
 export type FixtureCall = Omit<CallSnapshot, "contact"> &
   Partial<Pick<CallSnapshot, "contact">>;

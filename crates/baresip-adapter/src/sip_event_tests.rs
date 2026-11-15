@@ -2,8 +2,8 @@
 //! Run: `cargo test -p baresip-adapter --features native sip_event_tests`.
 use crate::Engine;
 use phone_core::{
-    AccountConfig, AudioMode, CallEventKind, CallState, EngineSnapshot, ErrorCode,
-    RegistrationState,
+    AccountConfig, AudioMode, CallEventKind, CallState, EngineSnapshot, ErrorCode, ExtensionState,
+    MonitoredExtension, RegistrationState,
 };
 use std::{
     io::ErrorKind,
@@ -58,6 +58,21 @@ impl Lab {
     }
 
     fn pending_registration(label: &str) -> (Self, String) {
+        Self::pending_registration_with_targets(label, Vec::new())
+    }
+
+    fn pending_registration_with_targets(
+        label: &str,
+        targets: Vec<MonitoredExtension>,
+    ) -> (Self, String) {
+        Self::pending_registration_with_targets_and_proxy(label, targets, None)
+    }
+
+    fn pending_registration_with_targets_and_proxy(
+        label: &str,
+        targets: Vec<MonitoredExtension>,
+        registrar: Option<&str>,
+    ) -> (Self, String) {
         let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
         peer.set_read_timeout(Some(Duration::from_millis(20)))
             .unwrap();
@@ -69,11 +84,12 @@ impl Lab {
         .unwrap();
         engine
             .configure_account(&AccountConfig {
+                monitored_extensions: targets,
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
-                outbound_proxy: None,
-                registrar: endpoint.to_string(),
+                outbound_proxy: registrar.map(|_| endpoint.to_string()),
+                registrar: registrar.map_or_else(|| endpoint.to_string(), str::to_owned),
                 username: "events-test".into(),
                 password: "synthetic-only".into(),
                 audio_mode: AudioMode::TestTone,
@@ -179,6 +195,8 @@ impl Lab {
             self.reply(packet, "200 OK", "", &sdp(20, "sendrecv"));
         } else if packet.starts_with("REGISTER ") || packet.starts_with("BYE ") {
             self.reply(packet, "200 OK", "", "");
+        } else if packet.starts_with("SUBSCRIBE ") && header(packet, "Expires:") == "0" {
+            self.reply(packet, "200 OK", "Expires: 0\r\n", "");
         }
     }
 
@@ -562,6 +580,7 @@ fn retiring_accounts_finish_pending_register_before_unregistering() {
                     Some(id),
                     "Replacement",
                     &AccountConfig {
+                        monitored_extensions: Vec::new(),
                         transport: Default::default(),
                         media_security: Default::default(),
                         auth_username: None,
@@ -632,6 +651,7 @@ fn retired_register_timeout_preserves_replacement_registration() {
             Some(id),
             "Replacement",
             &AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -896,6 +916,7 @@ fn disabled_account_retains_selection_and_requires_ack_before_native_registratio
     );
     lab.settle();
     let config = AccountConfig {
+        monitored_extensions: Vec::new(),
         transport: Default::default(),
         media_security: Default::default(),
         auth_username: None,
@@ -1967,3 +1988,452 @@ fn controls_refused_hold_player_restart_failure_ends_owned_call() {
 
 #[path = "sip_reliability_tests.rs"]
 mod reliability;
+
+// These fixtures use actual libre subscriptions and UDP transactions; only the
+// remote registrar/notifier is synthetic. No frontend or native callback stubs.
+fn blf_target(extension: &str) -> MonitoredExtension {
+    MonitoredExtension {
+        extension: extension.into(),
+        name: "Fixture extension".into(),
+    }
+}
+
+fn blf_document(version: u64, kind: &str, body: &str) -> String {
+    format!(
+        r#"<dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" version="{version}" state="{kind}" entity="sip:200@fixture.test">{body}</dialog-info>"#
+    )
+}
+
+fn blf_wait(lab: &Lab, expected: ExtensionState) {
+    lab.wait(|state| state.accounts[0].monitored_extensions[0].state == expected);
+}
+
+fn blf_subscribe(lab: &Lab, previous: Option<&str>) -> String {
+    lab.receive("BLF SUBSCRIBE", |packet| {
+        packet.starts_with("SUBSCRIBE ")
+            && header(packet, "Expires:") != "0"
+            && previous
+                .is_none_or(|previous| header(packet, "Call-ID:") != header(previous, "Call-ID:"))
+    })
+}
+
+fn blf_notify(lab: &Lab, subscription: &str, sequence: u32, state: &str, body: &str) {
+    let endpoint = lab.peer.local_addr().unwrap();
+    lab.send(&format!(
+        "NOTIFY {} SIP/2.0\r\nVia: SIP/2.0/UDP {endpoint};branch=z9hG4bKblf-{sequence}-{};rport\r\nMax-Forwards: 70\r\nFrom: {};tag=peer\r\nTo: {}\r\nCall-ID: {}\r\nCSeq: {sequence} NOTIFY\r\nContact: <sip:notifier@{endpoint}>\r\nEvent: dialog\r\nSubscription-State: {state}\r\nContent-Type: application/dialog-info+xml\r\nContent-Length: {}\r\n\r\n{body}",
+        uri(header(subscription, "Contact:")),
+        header(subscription, "Call-ID:"),
+        header(subscription, "To:"),
+        header(subscription, "From:"),
+        header(subscription, "Call-ID:"),
+        body.len(),
+    ));
+}
+
+fn blf_registered(label: &str) -> Lab {
+    let (lab, registration) =
+        Lab::pending_registration_with_targets(label, vec![blf_target("200")]);
+    lab.reply(&registration, "200 OK", "", "");
+    lab.wait(|state| state.registration == RegistrationState::Registered);
+    blf_wait(&lab, ExtensionState::Unknown);
+    lab
+}
+
+#[test]
+fn blf_authenticated_subscription_reduces_real_full_and_partial_notifications() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let lab = blf_registered("blf-auth");
+    let subscription = blf_subscribe(&lab, None);
+    assert!(subscription.starts_with("SUBSCRIBE sip:200@"));
+    assert_eq!(header(&subscription, "Event:"), "dialog");
+    assert_eq!(
+        header(&subscription, "Accept:"),
+        "application/dialog-info+xml"
+    );
+    assert!(!subscription.contains("Authorization:"));
+    lab.reply(&subscription, "401 Unauthorized", "WWW-Authenticate: Digest realm=\"blf-fixture\", nonce=\"only-synthetic\", algorithm=MD5\r\n", "");
+    let authenticated = lab.receive("authenticated BLF SUBSCRIBE", |packet| {
+        packet.starts_with("SUBSCRIBE ") && packet.contains("Authorization:")
+    });
+    let authorization = header(&authenticated, "Authorization:");
+    assert!(authorization.starts_with("Digest "));
+    assert!(authorization.contains("username=\"events-test\""));
+    assert!(authorization.contains("realm=\"blf-fixture\""));
+    let digest_uri = authorization
+        .split("uri=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let digest = std::process::Command::new("python3")
+        .args(["-c", "import hashlib,sys; h=lambda s: hashlib.md5(s.encode()).hexdigest(); print(h(h('events-test:blf-fixture:synthetic-only')+':only-synthetic:'+h('SUBSCRIBE:'+sys.argv[1])))", digest_uri])
+        .output().unwrap();
+    assert!(digest.status.success());
+    let expected = String::from_utf8(digest.stdout).unwrap();
+    assert!(authorization.contains(&format!("response=\"{}\"", expected.trim())));
+    assert!(!authenticated.contains("synthetic-only"));
+    lab.reply(&authenticated, "200 OK", "Expires: 30\r\n", "");
+    for (sequence, version, kind, body, expected) in [
+        (1, 0, "full", "", ExtensionState::Idle),
+        (
+            2,
+            1,
+            "partial",
+            r#"<dialog id="a"><state>early</state></dialog>"#,
+            ExtensionState::Ringing,
+        ),
+        (
+            3,
+            2,
+            "partial",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+            ExtensionState::Busy,
+        ),
+        (
+            4,
+            3,
+            "partial",
+            r#"<dialog id="a"><state>terminated</state></dialog>"#,
+            ExtensionState::Idle,
+        ),
+    ] {
+        blf_notify(
+            &lab,
+            &authenticated,
+            sequence,
+            "active;expires=30",
+            &blf_document(version, kind, body),
+        );
+        lab.response(200, &format!("{sequence} NOTIFY"));
+        blf_wait(&lab, expected);
+    }
+}
+
+#[test]
+fn blf_gaps_malformed_xml_and_termination_reset_then_resubscribe() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let lab = blf_registered("blf-resync");
+    let first = blf_subscribe(&lab, None);
+    lab.reply(&first, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &first,
+        1,
+        "active;expires=30",
+        &blf_document(
+            0,
+            "full",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+        ),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Busy);
+    blf_notify(
+        &lab,
+        &first,
+        2,
+        "active;expires=30",
+        &blf_document(
+            2,
+            "partial",
+            r#"<dialog id="a"><state>terminated</state></dialog>"#,
+        ),
+    );
+    lab.response(200, "2 NOTIFY");
+    blf_wait(&lab, ExtensionState::Unknown);
+    let second = blf_subscribe(&lab, Some(&first));
+    lab.reply(&second, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &second,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+    blf_notify(&lab, &second, 2, "active;expires=30", "<dialog-info broken");
+    lab.response(200, "2 NOTIFY");
+    blf_wait(&lab, ExtensionState::Unknown);
+    let third = blf_subscribe(&lab, Some(&second));
+    lab.reply(&third, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &third,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", r#"<dialog id="b"><state>early</state></dialog>"#),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Ringing);
+    blf_notify(&lab, &third, 2, "terminated;reason=timeout", "");
+    lab.response(200, "2 NOTIFY");
+    blf_wait(&lab, ExtensionState::Unknown);
+    let fourth = blf_subscribe(&lab, Some(&third));
+    lab.reply(&fourth, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &fourth,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+}
+
+#[test]
+fn blf_short_expiry_renews_existing_dialog_and_missing_renewal_becomes_unknown() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let lab = blf_registered("blf-expiry");
+    let first = blf_subscribe(&lab, None);
+    lab.reply(&first, "200 OK", "Expires: 2\r\n", "");
+    blf_notify(
+        &lab,
+        &first,
+        1,
+        "active;expires=2",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+    let renewal = lab.receive("BLF subscription renewal", |packet| {
+        packet.starts_with("SUBSCRIBE ")
+            && header(packet, "Expires:") != "0"
+            && header(packet, "Call-ID:") == header(&first, "Call-ID:")
+            && header(packet, "CSeq:") != header(&first, "CSeq:")
+    });
+    lab.reply(&renewal, "200 OK", "Expires: 2\r\n", "");
+    blf_notify(
+        &lab,
+        &first,
+        2,
+        "active;expires=2",
+        &blf_document(1, "full", ""),
+    );
+    lab.response(200, "2 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+    // The notifier now stops confirming refreshes. The last coherent view must
+    // expire instead of remaining green indefinitely.
+    blf_wait(&lab, ExtensionState::Unknown);
+    let replacement = blf_subscribe(&lab, Some(&first));
+    lab.reply(&replacement, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &replacement,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+}
+
+#[test]
+fn blf_retired_subscriptions_cannot_update_replaced_or_removed_accounts() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut lab = blf_registered("blf-retired");
+    let old = blf_subscribe(&lab, None);
+    lab.reply(&old, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &old,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", r#"<dialog id="a"><state>early</state></dialog>"#),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Ringing);
+    let id = lab.engine.snapshot().unwrap().accounts[0].id;
+    let config = AccountConfig {
+        monitored_extensions: vec![blf_target("200")],
+        transport: Default::default(),
+        media_security: Default::default(),
+        auth_username: None,
+        outbound_proxy: None,
+        registrar: lab.peer.local_addr().unwrap().to_string(),
+        username: "events-test".into(),
+        password: "synthetic-only".into(),
+        audio_mode: AudioMode::TestTone,
+    };
+    lab.engine
+        .save_account(Some(id), "Replacement", &config)
+        .unwrap();
+    lab.engine.wait_account_update(id).unwrap();
+    let registration = lab.receive("replacement REGISTER", |packet| {
+        packet.starts_with("REGISTER ") && !header(packet, "Contact:").contains("expires=0")
+    });
+    lab.reply(&registration, "200 OK", "", "");
+    lab.wait(|state| state.registration == RegistrationState::Registered);
+    let current = blf_subscribe(&lab, Some(&old));
+    assert!(current.starts_with("SUBSCRIBE sip:200@"));
+    lab.reply(&current, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &old,
+        2,
+        "active;expires=30",
+        &blf_document(
+            1,
+            "full",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+        ),
+    );
+    let stale = lab.receive("retired subscription response", |packet| {
+        packet.starts_with("SIP/2.0 ") && header(packet, "CSeq:") == "2 NOTIFY"
+    });
+    assert!(stale.starts_with("SIP/2.0 200") || stale.starts_with("SIP/2.0 481"));
+    blf_wait(&lab, ExtensionState::Unknown);
+    assert_eq!(
+        lab.engine.snapshot().unwrap().accounts[0].monitored_extensions[0].extension,
+        "200"
+    );
+    blf_notify(
+        &lab,
+        &current,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Idle);
+    lab.engine.remove_account(id).unwrap();
+    lab.engine.wait_account_removed(id).unwrap();
+    blf_notify(
+        &lab,
+        &current,
+        2,
+        "active;expires=30",
+        &blf_document(
+            1,
+            "full",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+        ),
+    );
+    let retired = lab.receive("removed subscription response", |packet| {
+        packet.starts_with("SIP/2.0 ") && header(packet, "CSeq:") == "2 NOTIFY"
+    });
+    assert!(retired.starts_with("SIP/2.0 200") || retired.starts_with("SIP/2.0 481"));
+    assert!(lab.engine.snapshot().unwrap().accounts.is_empty());
+}
+
+#[test]
+fn blf_identical_extensions_on_different_accounts_keep_independent_state() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut lab = blf_registered("blf-account-scope");
+    let first = blf_subscribe(&lab, None);
+    lab.reply(&first, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &first,
+        1,
+        "active;expires=30",
+        &blf_document(
+            0,
+            "full",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+        ),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Busy);
+    let id = lab
+        .engine
+        .save_account(
+            None,
+            "Other account",
+            &AccountConfig {
+                monitored_extensions: vec![blf_target("200")],
+                transport: Default::default(),
+                media_security: Default::default(),
+                auth_username: None,
+                outbound_proxy: None,
+                registrar: lab.peer.local_addr().unwrap().to_string(),
+                username: "events-second".into(),
+                password: "synthetic-second".into(),
+                audio_mode: AudioMode::TestTone,
+            },
+        )
+        .unwrap();
+    lab.engine.wait_account_update(id).unwrap();
+    let registration = lab.receive("second account REGISTER", |packet| {
+        packet.starts_with("REGISTER ") && header(packet, "From:").contains("events-second")
+    });
+    lab.reply(&registration, "200 OK", "", "");
+    lab.wait(|state| state.accounts[1].registration == RegistrationState::Registered);
+    let second = blf_subscribe(&lab, Some(&first));
+    assert!(header(&second, "From:").contains("events-second"));
+    lab.reply(&second, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &second,
+        1,
+        "active;expires=30",
+        &blf_document(0, "full", ""),
+    );
+    lab.response(200, "1 NOTIFY");
+    let state =
+        lab.wait(|state| state.accounts[1].monitored_extensions[0].state == ExtensionState::Idle);
+    assert_eq!(
+        state.accounts[0].monitored_extensions[0].state,
+        ExtensionState::Busy
+    );
+    blf_notify(&lab, &second, 2, "terminated;reason=timeout", "");
+    lab.response(200, "2 NOTIFY");
+    let state = lab
+        .wait(|state| state.accounts[1].monitored_extensions[0].state == ExtensionState::Unknown);
+    assert_eq!(
+        state.accounts[0].monitored_extensions[0].state,
+        ExtensionState::Busy
+    );
+}
+
+#[test]
+fn blf_outbound_proxy_routes_subscriptions_without_replacing_registrar_identity() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let (lab, registration) = Lab::pending_registration_with_targets_and_proxy(
+        "blf-proxy",
+        vec![blf_target("200")],
+        Some("unreachable-blf.invalid"),
+    );
+    // Receipt on this socket proves routing through the configured proxy;
+    // the registrar intentionally cannot be reached through ordinary DNS.
+    assert!(
+        registration.starts_with("REGISTER sip:unreachable-blf.invalid"),
+        "unexpected REGISTER target: {}",
+        registration.lines().next().unwrap()
+    );
+    assert!(header(&registration, "From:").contains("events-test@unreachable-blf.invalid"));
+    lab.reply(&registration, "200 OK", "", "");
+    lab.wait(|state| state.registration == RegistrationState::Registered);
+    let subscription = blf_subscribe(&lab, None);
+    assert!(subscription.starts_with("SUBSCRIBE sip:200@unreachable-blf.invalid;transport=udp "));
+    assert!(header(&subscription, "From:").contains("events-test@unreachable-blf.invalid"));
+    assert!(header(&subscription, "Route:").contains(&lab.peer.local_addr().unwrap().to_string()));
+    lab.reply(&subscription, "200 OK", "Expires: 30\r\n", "");
+    blf_notify(
+        &lab,
+        &subscription,
+        1,
+        "active;expires=30",
+        &blf_document(
+            0,
+            "full",
+            r#"<dialog id="a"><state>confirmed</state></dialog>"#,
+        ),
+    );
+    lab.response(200, "1 NOTIFY");
+    blf_wait(&lab, ExtensionState::Busy);
+}

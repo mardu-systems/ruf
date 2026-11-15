@@ -39,6 +39,8 @@ export function englishExpectedLabels(): Record<string, string> {
   add("phone.history.show_details", { name: "Anna Beispiel" });
   add("phone.history.details", { name: "Anna Beispiel" });
   add("phone.dtmf.tone", { digit: "#" });
+  add("settings.blf_extension", { index: "1" });
+  add("settings.blf_name", { index: "1" });
   return labels;
 }
 
@@ -153,6 +155,22 @@ export async function englishSmoke(
   } else if (flow === "phone") {
     await page.goto(baseUrl);
     await page.getByText(label("app.registered"), { exact: true }).waitFor();
+    await page.evaluate(() => {
+      const fixture = window.__phoneFixture;
+      fixture.state.accounts[0]!.monitoredExtensions = [
+        { extension: "1001", name: "Reception", state: "ringing" },
+      ];
+      fixture.emit();
+    });
+    await page
+      .getByRole("region", { name: label("phone.blf.title"), exact: true })
+      .getByText(label("phone.blf.ringing"), { exact: true })
+      .waitFor();
+    await page.evaluate(() => {
+      const fixture = window.__phoneFixture;
+      fixture.state.accounts[0]!.monitoredExtensions = [];
+      fixture.emit();
+    });
     await page
       .getByRole("textbox", { name: label("phone.dial.number"), exact: true })
       .fill("1003");
@@ -351,6 +369,28 @@ export async function englishSmoke(
       .getByText(label("settings.permission_granted"), { exact: true })
       .first()
       .waitFor();
+    await page.goto(`${baseUrl}/?window=settings&section=accounts`);
+    await button("settings.blf_add").click();
+    await page
+      .getByLabel(label("settings.blf_extension", { index: "1" }), {
+        exact: true,
+      })
+      .fill("1001");
+    await page
+      .getByLabel(label("settings.blf_name", { index: "1" }), { exact: true })
+      .fill("Reception");
+    await button("settings.save_connect").click();
+    await page.locator(".settings-feedback.error").first().waitFor();
+    const monitored = await page.evaluate(
+      () =>
+        window.__settingsTest.commands.find(
+          (item) => item.command === "save_account",
+        )?.args.account?.monitoredExtensions,
+    );
+    assert(
+      monitored?.[0]?.extension === "1001" && monitored[0].name === "Reception",
+      "English BLF editor changed the native configuration contract",
+    );
   } else if (flow === "layout") {
     for (const [width, height] of [
       [340, 500],

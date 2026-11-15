@@ -8,7 +8,8 @@ export type AccountField =
   | "transport"
   | "mediaSecurity"
   | "authUsername"
-  | "outboundProxy";
+  | "outboundProxy"
+  | "monitoredExtensions";
 export type AccountErrors = Partial<Record<AccountField, Message>>;
 const INTRODUCTION_KEY = "sip.introduction.v1";
 
@@ -20,6 +21,10 @@ export function normalizeAccount(account: AccountConfig): AccountConfig {
     username: account.username.trim(),
     authUsername: account.authUsername?.trim() || null,
     outboundProxy: account.outboundProxy?.trim() || null,
+    monitoredExtensions: (account.monitoredExtensions ?? []).map((target) => ({
+      extension: target.extension.trim(),
+      name: target.name.trim(),
+    })),
   };
 }
 
@@ -50,6 +55,19 @@ export function validateAccount(
   ) {
     errors.password = message("validation.password");
   }
+  const targets = account.monitoredExtensions ?? [];
+  if (
+    targets.length > 32 ||
+    new Set(targets.map((target) => target.extension)).size !==
+      targets.length ||
+    targets.some(
+      (target) =>
+        !/^[0-9]{1,32}$/.test(target.extension) ||
+        [...target.name].length > 64 ||
+        /[\u0000-\u001f\u007f-\u009f]/u.test(target.name),
+    )
+  )
+    errors.monitoredExtensions = message("validation.monitoredExtensions");
   return errors;
 }
 

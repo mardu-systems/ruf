@@ -72,6 +72,7 @@
     mediaSecurity: "disabled",
     authUsername: null,
     outboundProxy: null,
+    monitoredExtensions: [],
     registrar: "",
     username: "",
     password: "",
@@ -207,6 +208,7 @@
       mediaSecurity: account.mediaSecurity,
       authUsername: account.authUsername,
       outboundProxy: account.outboundProxy,
+      monitoredExtensions: account.monitoredExtensions,
     });
   }
   function edit(id: number | null) {
@@ -218,6 +220,9 @@
       mediaSecurity: saved?.mediaSecurity ?? "disabled",
       authUsername: saved?.authUsername ?? null,
       outboundProxy: saved?.outboundProxy ?? null,
+      monitoredExtensions: (saved?.monitoredExtensions ?? []).map(
+        ({ extension, name }) => ({ extension, name }),
+      ),
       registrar: saved?.registrar ?? "",
       username: saved?.username ?? "",
       password: "",
@@ -356,7 +361,14 @@
         account.transport !== updated.transport ||
         account.mediaSecurity !== updated.mediaSecurity ||
         account.authUsername !== updated.authUsername ||
-        account.outboundProxy !== updated.outboundProxy
+        account.outboundProxy !== updated.outboundProxy ||
+        JSON.stringify(account.monitoredExtensions) !==
+          JSON.stringify(
+            (updated.monitoredExtensions ?? []).map(({ extension, name }) => ({
+              extension,
+              name,
+            })),
+          )
       )
         edit(updated.id);
     }

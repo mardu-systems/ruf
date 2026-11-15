@@ -5,6 +5,8 @@ use ts_rs::TS;
 
 mod audio_diagnostics;
 pub use audio_diagnostics::*;
+mod blf;
+pub use blf::*;
 mod phone;
 pub use phone::*;
 mod diagnostics;

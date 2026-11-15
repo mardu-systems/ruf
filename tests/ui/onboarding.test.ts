@@ -18,6 +18,7 @@ const account = (): AccountConfig => ({
   mediaSecurity: "disabled",
   authUsername: null,
   outboundProxy: null,
+  monitoredExtensions: [],
 });
 
 describe("SIP account onboarding", () => {
@@ -169,3 +170,48 @@ function validateAccount(...args: Parameters<typeof validateAccountMessages>) {
     ]),
   );
 }
+
+describe("monitored extension configuration", () => {
+  test("trims extension labels and numbers without mutating the draft", () => {
+    const original = {
+      ...account(),
+      monitoredExtensions: [{ extension: " 1001 ", name: " Reception " }],
+    };
+    const normalized = normalizeAccount(original);
+    expect(normalized.monitoredExtensions).toEqual([
+      { extension: "1001", name: "Reception" },
+    ]);
+    expect(original.monitoredExtensions[0]!.extension).toBe(" 1001 ");
+    expect(validateAccount(normalized)).toEqual({});
+  });
+
+  test("rejects duplicate, malformed, excessive and unsafe monitored targets", () => {
+    for (const monitoredExtensions of [
+      [
+        { extension: "1001", name: "A" },
+        { extension: "1001", name: "B" },
+      ],
+      [{ extension: "sip:1001@pbx.test", name: "" }],
+      [{ extension: "", name: "" }],
+      [{ extension: "1".repeat(33), name: "" }],
+      [{ extension: "1001", name: "a\nlabel" }],
+      [{ extension: "1001", name: "a".repeat(65) }],
+      Array.from({ length: 33 }, (_, i) => ({
+        extension: String(i),
+        name: "",
+      })),
+    ]) {
+      expect(
+        validateAccount({ ...account(), monitoredExtensions }),
+      ).toHaveProperty("monitoredExtensions");
+    }
+  });
+
+  test("accepts 32 unique numeric targets and Unicode labels", () => {
+    const monitoredExtensions = Array.from({ length: 32 }, (_, i) => ({
+      extension: String(i),
+      name: "😀".repeat(64),
+    }));
+    expect(validateAccount({ ...account(), monitoredExtensions })).toEqual({});
+  });
+});

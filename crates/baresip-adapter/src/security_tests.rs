@@ -60,6 +60,7 @@ impl Peer {
     }
     fn config(&self, host: &str) -> AccountConfig {
         AccountConfig {
+            monitored_extensions: Vec::new(),
             registrar: format!("{host}:{}", self.port),
             username: "tls-fixture".into(),
             password: "synthetic-only".into(),
@@ -459,4 +460,52 @@ fn invalid_crypto_with_incompatible_codec_remains_fatal() {
 #[test]
 fn unsupported_media_transport_remains_fatal() {
     established_rekey_failure("rekey-proto");
+}
+
+#[test]
+fn blf_tcp_and_verified_tls_subscriptions_receive_native_notifications() {
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    for (mode, transport) in [
+        ("blf-tcp", SipTransport::Tcp),
+        ("blf-tls", SipTransport::Tls),
+    ] {
+        let peer = Peer::new(mode, mode);
+        let mut engine = peer.engine();
+        let mut config = peer.config("localhost");
+        config.transport = transport;
+        config.media_security = MediaSecurityPolicy::Disabled;
+        config.monitored_extensions = vec![phone_core::MonitoredExtension {
+            extension: "200".into(),
+            name: "Stream fixture".into(),
+        }];
+        engine.configure_account(&config).unwrap();
+        let state = wait(&engine, |state| {
+            state.accounts[0].monitored_extensions[0].state == phone_core::ExtensionState::Busy
+        });
+        assert_eq!(
+            state.accounts[0].registration,
+            RegistrationState::Registered
+        );
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            let packets = peer.packets();
+            if packets.lines().any(|line| {
+                line.starts_with("RX_TRANSACTION|SIP/2.0 200|") && line.ends_with("|1 NOTIFY")
+            }) {
+                assert!(packets.contains("SUBSCRIBE sip:200@localhost:"));
+                assert!(packets.contains(if transport == SipTransport::Tls {
+                    "HANDSHAKE"
+                } else {
+                    "CONNECTED"
+                }));
+                assert!(!packets.contains("PLAINTEXT RECEIVED"));
+                break;
+            }
+            assert!(Instant::now() < until, "{mode} NOTIFY was not acknowledged");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        engine.shutdown().unwrap();
+    }
 }

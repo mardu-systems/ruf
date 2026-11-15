@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t, text, locale, type MessageValue } from "../i18n";
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, type Snippet } from "svelte";
   import { insertDigit, removeDigit, MAX_NUMBER_LENGTH } from "../dialing";
   import { dialSuggestions } from "../contacts";
   import { normalizeDialNumber } from "../dialing";
@@ -19,6 +19,7 @@
     matchGermanNumbers = true,
     oncall,
     onsetup,
+    children,
   }: {
     value?: string;
     canCall: boolean;
@@ -31,6 +32,7 @@
     matchGermanNumbers?: boolean;
     oncall: () => void;
     onsetup: () => void;
+    children?: Snippet;
   } = $props();
   let input: HTMLInputElement;
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
@@ -217,4 +219,11 @@
     disabled={!canCall || busy}
     ><Icon name="phone" size={18} />{$t("phone.dial.call")}</button
   >
+  {@render children?.()}
 </form>
+
+<style>
+  .dial-view {
+    grid-auto-rows: max-content;
+  }
+</style>

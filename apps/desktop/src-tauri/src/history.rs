@@ -601,6 +601,7 @@ mod query_tests {
     }
     fn account() -> AccountSnapshot {
         AccountSnapshot {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,

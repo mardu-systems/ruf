@@ -111,6 +111,12 @@ const fields: LocalizedSettingResult[] = [
     terms: message("navigation.proxy_server_routing_connection"),
   },
   {
+    section: "accounts",
+    target: "monitored-extensions",
+    label: message("settings.blf_title"),
+    terms: message("navigation.blf_terms"),
+  },
+  {
     section: "audio",
     target: "inputDevice",
     label: message("navigation.microphone"),

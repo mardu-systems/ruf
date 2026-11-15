@@ -46,6 +46,7 @@
   } from "./lib/generated/AppInfo";
   import Icon from "./lib/components/Icon.svelte";
   import Dialpad from "./lib/components/Dialpad.svelte";
+  import MonitoredExtensions from "./lib/components/MonitoredExtensions.svelte";
   import CallPanel from "./lib/components/CallPanel.svelte";
   import GettingStarted from "./lib/components/GettingStarted.svelte";
   import HistoryPanel from "./lib/components/HistoryPanel.svelte";
@@ -993,6 +994,17 @@
         onexplore={() => selectView("dialer")}
       />
     {:else if view === "dialer"}
+      {#snippet extensions()}
+        <MonitoredExtensions
+          extensions={selectedAccount?.monitoredExtensions ?? []}
+          canDial={nativeAvailable &&
+            !audioUnknown &&
+            registered &&
+            callIdle &&
+            !busy}
+          oncall={(target) => void placeContactCall(target)}
+        />
+      {/snippet}
       {#if callIdle}<Dialpad
           bind:value={destination}
           contacts={dialContacts?.permission === "authorized"
@@ -1014,7 +1026,12 @@
             else if (nativeAvailable) void showSettings();
             else selectView("start");
           }}
-        />{/if}
+        >
+          {@render extensions()}
+        </Dialpad>
+      {:else}
+        {@render extensions()}
+      {/if}
     {:else if view === "contacts"}
       <ContactsPanel
         focusSearchRequest={view === "contacts" ? searchFocusRequest : 0}
@@ -1069,6 +1086,9 @@
 </div>
 
 <style>
+  .phone-content.in-call > :global(.monitored-extensions) {
+    margin: 12px 14px 0;
+  }
   .notification-hint {
     color: var(--caution);
   }

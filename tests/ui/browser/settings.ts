@@ -398,6 +398,12 @@ export default async function settingsRegressions(
               mediaSecurity: args.account!.mediaSecurity,
               authUsername: args.account!.authUsername,
               outboundProxy: args.account!.outboundProxy,
+              monitoredExtensions: args.account!.monitoredExtensions.map(
+                (target) => ({
+                  ...target,
+                  state: "unknown" as const,
+                }),
+              ),
             });
             const captured = structuredClone(
               window.__rufTestSyncDialogs(state.snapshot),
@@ -452,6 +458,117 @@ export default async function settingsRegressions(
       );
     }
   };
+  await check(
+    "BLF drafts validate duplicates, survive navigation and submit only configuration",
+    "",
+    async () => {
+      await page
+        .getByRole("button", { name: "Nebenstelle hinzufügen", exact: true })
+        .click();
+      await page.getByLabel("Nebenstelle 1", { exact: true }).fill("1001");
+      await page
+        .getByLabel("Anzeigename 1 (optional)", { exact: true })
+        .fill(" Empfang ");
+      await page.getByRole("button", { name: "Ton", exact: true }).click();
+      await page
+        .getByRole("group", { name: "Ungespeicherte Änderungen" })
+        .waitFor();
+      await page
+        .getByRole("button", { name: "Weiter bearbeiten", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Nebenstelle hinzufügen", exact: true })
+        .click();
+      await page.getByLabel("Nebenstelle 2", { exact: true }).fill("1001");
+      if (_capture) {
+        await page.locator(".blf-editor-row").first().scrollIntoViewIfNeeded();
+        await page.screenshot({ path: "output/playwright/blf-settings.png" });
+      }
+      await page
+        .getByRole("button", { name: "Speichern & verbinden", exact: true })
+        .click();
+      await page.locator("#blf-error").waitFor();
+      if (
+        await page.evaluate(() =>
+          window.__settingsTest.commands.some(
+            (item) => item.command === "save_account",
+          ),
+        )
+      )
+        throw new Error("Duplicate BLF extension reached IPC");
+      await page.getByLabel("Nebenstelle 2", { exact: true }).fill("1002");
+      await page
+        .getByRole("button", { name: "Speichern & verbinden", exact: true })
+        .click();
+      await page.locator(".settings-feedback.error").first().waitFor();
+      const targets = await page.evaluate(
+        () =>
+          window.__settingsTest.commands.find(
+            (item) => item.command === "save_account",
+          )?.args.account?.monitoredExtensions,
+      );
+      if (
+        JSON.stringify(targets) !==
+        JSON.stringify([
+          { extension: "1001", name: "Empfang" },
+          { extension: "1002", name: "" },
+        ])
+      )
+        throw new Error(
+          "BLF draft configuration was lost: " + JSON.stringify(targets),
+        );
+      if (
+        (await page
+          .getByLabel("Nebenstelle 1", { exact: true })
+          .inputValue()) !== "1001"
+      )
+        throw new Error("Failed save lost the BLF draft");
+      await page
+        .getByRole("button", { name: "Nebenstelle 2 entfernen", exact: true })
+        .click();
+      if (await page.getByLabel("Nebenstelle 2", { exact: true }).count())
+        throw new Error("Removed BLF target is still in draft");
+    },
+  );
+  await check(
+    "BLF status refresh preserves saved target configuration without dirtying settings",
+    "",
+    async () => {
+      await page.evaluate(() => {
+        const fixture = window.__settingsTest;
+        fixture.snapshot.accounts[0]!.monitoredExtensions = [
+          { extension: "1001", name: "Empfang", state: "idle" },
+        ];
+        fixture.emit(fixture.snapshot);
+      });
+      await page
+        .getByLabel("Anzeigename 1 (optional)", { exact: true })
+        .waitFor();
+      if (
+        (await page
+          .getByLabel("Anzeigename 1 (optional)", { exact: true })
+          .inputValue()) !== "Empfang"
+      )
+        throw new Error(
+          "Saved BLF label was not restored into the account draft",
+        );
+      await page.evaluate(() => {
+        const fixture = window.__settingsTest;
+        fixture.snapshot.accounts[0]!.monitoredExtensions![0]!.state = "busy";
+        fixture.emit(fixture.snapshot);
+      });
+      await page.getByRole("button", { name: "Ton", exact: true }).click();
+      await page.getByRole("heading", { name: "Ton", exact: true }).waitFor();
+      if (
+        await page
+          .getByRole("group", { name: "Ungespeicherte Änderungen" })
+          .count()
+      )
+        throw new Error(
+          "A BLF status update dirtied saved account configuration",
+        );
+    },
+  );
   await check(
     "microphone settings open failure preserves authorization and retry clears the action error",
     "",

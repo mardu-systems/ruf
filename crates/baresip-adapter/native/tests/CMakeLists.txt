@@ -33,9 +33,10 @@ else()
     endif()
 endif()
 
-add_executable(call_actions_test call_actions.c ../audio_diagnostics.c ../security.c)
+add_executable(call_actions_test call_actions.c ../audio_diagnostics.c ../security.c ../blf.c)
+add_executable(blf_test blf_test.c)
 add_executable(latency_probe ../latency_probe.c)
-foreach(test call_actions_test latency_probe)
+foreach(test call_actions_test latency_probe blf_test)
     target_compile_features(${test} PRIVATE c_std_11)
     target_include_directories(${test} SYSTEM PRIVATE
         "${SIP_SDK_PREFIX}/include" "${SIP_SDK_PREFIX}/include/re")

@@ -42,6 +42,8 @@ const EV_RECOVERING: i32 = 48;
 const EV_CONSULT_FAILED: i32 = 49;
 const EV_CALL_ERROR: i32 = 50;
 const EV_SECURITY: i32 = 51;
+const EV_BLF_NOTIFY: i32 = 52;
+const EV_BLF_UNKNOWN: i32 = 53;
 const SECURITY_CERTIFICATE: i32 = 20001;
 const SECURITY_TRANSPORT: i32 = 20002;
 const SECURITY_MEDIA: i32 = 20003;
@@ -61,6 +63,10 @@ struct NativeEvent {
 }
 
 unsafe extern "C" {
+    fn sip_engine_set_blf_callback(
+        handle: *mut c_void,
+        callback: extern "C" fn(*const NativeEvent, *mut c_void) -> i32,
+    );
     fn sip_engine_create(
         callback: extern "C" fn(*const NativeEvent, *mut c_void),
         arg: *mut c_void,
@@ -86,6 +92,7 @@ unsafe extern "C" {
         media_security: i32,
         auth_username: *const std::ffi::c_char,
         outbound_proxy: *const std::ffi::c_char,
+        monitored_extensions: *const std::ffi::c_char,
     ) -> i32;
     fn sip_audio_devices(
         callback: extern "C" fn(
@@ -114,6 +121,66 @@ impl Handle {
 struct CallbackContext {
     snapshot: Arc<Mutex<EngineState>>,
     ready: mpsc::Sender<Result<(), PhoneError>>,
+}
+
+// Called synchronously on the native event loop; return 1 requests a deferred full resync.
+extern "C" fn blf_callback(event: *const NativeEvent, arg: *mut c_void) -> i32 {
+    catch_unwind(AssertUnwindSafe(|| {
+        if event.is_null() || arg.is_null() {
+            return 1;
+        }
+        // The C subscription owns all strings for this invocation; copy/parse before returning.
+        let event = unsafe { &*event };
+        if event.caller_number.is_null() {
+            return 1;
+        }
+        let Ok(extension) = (unsafe { CStr::from_ptr(event.caller_number) }).to_str() else {
+            return 1;
+        };
+        let context = unsafe { &*arg.cast::<CallbackContext>() };
+        let Ok(mut engine) = context.snapshot.lock() else {
+            return 1;
+        };
+        let Some(account_index) = engine
+            .snapshot
+            .accounts
+            .iter()
+            .position(|a| a.id == event.account_id && a.enabled && !a.removing)
+        else {
+            return 0;
+        };
+        let Some(target_index) = engine.snapshot.accounts[account_index]
+            .monitored_extensions
+            .iter()
+            .position(|t| t.extension == extension)
+        else {
+            return 0;
+        };
+        let key = (event.account_id, extension.to_owned());
+        let result = if event.kind == EV_BLF_UNKNOWN {
+            engine.blf_dialogs.entry(key.clone()).or_default().reset();
+            Ok(phone_core::ExtensionState::Unknown)
+        } else if event.kind == EV_BLF_NOTIFY && !event.detail.is_null() {
+            match (unsafe { CStr::from_ptr(event.detail) }).to_str() {
+                Ok(xml) => engine
+                    .blf_dialogs
+                    .entry(key.clone())
+                    .or_default()
+                    .apply(xml),
+                Err(_) => Err(()),
+            }
+        } else {
+            Err(())
+        };
+        let resync = result.is_err();
+        engine.snapshot.accounts[account_index].monitored_extensions[target_index].state =
+            result.unwrap_or_default();
+        if resync {
+            engine.blf_dialogs.remove(&key);
+        }
+        i32::from(resync)
+    }))
+    .unwrap_or(1)
 }
 
 extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
@@ -544,6 +611,12 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             } else {
                 None
             };
+            if kind == 13 {
+                engine.blf_dialogs.retain(|(id, _), _| *id != account_id);
+            }
+            if kind == 11 {
+                engine.blf_dialogs.clear();
+            }
             let closing_owner = engine.snapshot.call_account_id.unwrap_or(account_id);
             let state = &mut engine.snapshot;
             match kind {
@@ -672,6 +745,9 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                     state.call_connected_at_ms = None;
                     for account in &mut state.accounts {
                         account.registration = RegistrationState::Unconfigured;
+                        for target in &mut account.monitored_extensions {
+                            target.state = phone_core::ExtensionState::Unknown;
+                        }
                     }
                     if code != 0 {
                         state.last_error = Some(native_error(code));
@@ -911,6 +987,9 @@ impl NativeEngine {
             ENGINE_LEASE.store(false, Ordering::Release);
             return Err(native_error(-1));
         };
+        unsafe {
+            sip_engine_set_blf_callback(raw, blf_callback);
+        }
         #[cfg(feature = "native-test-hooks")]
         if let Some(path) = test_ca {
             let code = unsafe { sip_engine_set_test_ca(raw, path.as_ptr()) };
@@ -1061,6 +1140,13 @@ impl NativeEngine {
         let media = i32::from(
             account.is_some_and(|a| a.media_security == phone_core::MediaSecurityPolicy::Required),
         );
+        let monitored_extensions = cstring(&account.map_or_else(String::new, |a| {
+            a.monitored_extensions
+                .iter()
+                .map(|t| t.extension.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }))?;
         let error = unsafe {
             sip_engine_request(
                 handle.0.as_ptr(),
@@ -1075,6 +1161,7 @@ impl NativeEngine {
                 media,
                 auth_username.as_ptr(),
                 outbound_proxy.as_ptr(),
+                monitored_extensions.as_ptr(),
             )
         };
         if error == 0 {
@@ -1295,6 +1382,28 @@ mod observation_tests {
         }
     }
     #[test]
+    fn removed_and_stopped_accounts_release_blf_dialog_tables() {
+        let mut h = Harness::new();
+        let mut other = crate::blf::DialogInfo::default();
+        other.apply(r#"<dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" entity="sip:101@pbx.test" version="0" state="full"/>"#).unwrap();
+        {
+            let mut state = h.context.snapshot.lock().unwrap();
+            state
+                .blf_dialogs
+                .insert((42, "101".into()), crate::blf::DialogInfo::default());
+            state.blf_dialogs.insert((43, "101".into()), other);
+        }
+        h.event(13, 0, 0, "", "");
+        {
+            let state = h.context.snapshot.lock().unwrap();
+            assert!(!state.blf_dialogs.contains_key(&(42, "101".into())));
+            assert!(state.blf_dialogs.contains_key(&(43, "101".into())));
+        }
+        h.event(11, 0, 0, "", "");
+        assert!(h.context.snapshot.lock().unwrap().blf_dialogs.is_empty());
+    }
+
+    #[test]
     fn security_observations_are_owned_reset_and_failures_survive_close() {
         let mut fixture = Harness::new();
         fixture.event_for_account(1, 7, 0, 100, "", "100");
@@ -1333,6 +1442,7 @@ mod observation_tests {
     fn activation_rejection_restores_prior_identity_and_confirmed_registration() {
         let mut h = Harness::new();
         let previous = phone_core::AccountSnapshot {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,
@@ -1353,6 +1463,7 @@ mod observation_tests {
             state.snapshot.selected_account_id = Some(42);
             state.pending_accounts.insert(42, Some(previous.clone()));
             state.snapshot.accounts.push(phone_core::AccountSnapshot {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1642,6 +1753,7 @@ mod observation_tests {
         for kind in [7, 22] {
             let mut h = Harness::new();
             let original = phone_core::AccountSnapshot {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1661,6 +1773,7 @@ mod observation_tests {
                 let mut state = h.context.snapshot.lock().unwrap();
                 state.pending_accounts.insert(42, Some(original.clone()));
                 state.snapshot.accounts.push(phone_core::AccountSnapshot {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,

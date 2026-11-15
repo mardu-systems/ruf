@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let recording = std::path::absolute(recording)?;
     let account = AccountConfig {
+        monitored_extensions: Vec::new(),
         transport: Default::default(),
         media_security: Default::default(),
         auth_username: None,

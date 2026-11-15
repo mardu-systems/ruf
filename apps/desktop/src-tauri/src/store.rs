@@ -21,6 +21,8 @@ pub(crate) fn session_directories(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SavedAccount {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monitored_extensions: Vec<phone_core::MonitoredExtension>,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     pub key: String,
@@ -130,6 +132,7 @@ impl AccountStore {
         }
         for (index, account) in settings.accounts.iter().enumerate() {
             AccountConfig {
+                monitored_extensions: account.monitored_extensions.clone(),
                 transport: account.transport,
                 media_security: account.media_security,
                 auth_username: account.auth_username.clone(),
@@ -550,6 +553,10 @@ mod tests {
         };
         let mut settings = SavedSettings::default();
         settings.accounts.push(SavedAccount {
+            monitored_extensions: vec![phone_core::MonitoredExtension {
+                extension: "00101".into(),
+                name: "Reception fixture".into(),
+            }],
             transport: phone_core::SipTransport::Tls,
             media_security: phone_core::MediaSecurityPolicy::Required,
             auth_username: Some("digest".into()),
@@ -565,6 +572,11 @@ mod tests {
         store.write(&settings).unwrap();
         let bytes = fs::read_to_string(&store.path).unwrap();
         assert!(!bytes.contains("password"));
+        assert!(!bytes.contains("\"state\""));
+        assert_eq!(
+            store.load().unwrap().accounts[0].monitored_extensions[0].extension,
+            "00101"
+        );
         assert_eq!(store.load().unwrap().accounts[0].name, "Privat");
         assert_eq!(store.load().unwrap().accounts, settings.accounts);
         // Existing v1 metadata predates sound preferences and must keep loading.
@@ -586,6 +598,7 @@ mod tests {
         };
         let valid = SavedSettings {
             accounts: vec![SavedAccount {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,

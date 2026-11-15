@@ -55,6 +55,8 @@ fn build_telephony() {
     println!("cargo:rerun-if-changed=native/audio_diagnostics.c");
     println!("cargo:rerun-if-changed=native/audio_diagnostics.h");
     println!("cargo:rerun-if-changed=native/audio_devices.h");
+    println!("cargo:rerun-if-changed=native/blf.c");
+    println!("cargo:rerun-if-changed=native/blf.h");
     println!("cargo:rerun-if-changed=native/network_roam.c");
     println!("cargo:rerun-if-changed=native/network_roam.h");
     println!("cargo:rerun-if-changed=../../native/sources.json");
@@ -135,6 +137,7 @@ fn build_telephony() {
         .file("native/audio_devices.c")
         .file("native/audio_diagnostics.c")
         .file("native/network_roam.c")
+        .file("native/blf.c")
         .include(prefix.join("include"))
         .include(prefix.join("include/re"))
         .std("c11");

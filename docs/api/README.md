@@ -81,6 +81,10 @@ inputs, output DTOs and error codes are unchanged.
 
 ## AccountConfig (credential-bearing input only)
 
+Optional `monitoredExtensions` and required per-account snapshot BLF states are
+documented in [live extension status](blf.md), including validation, persistence,
+subscription errors and recovery.
+
 Defaulted transport/authentication/proxy/media fields and observed per-call security
 are documented in [account security](account-security.md).
 

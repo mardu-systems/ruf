@@ -1,5 +1,8 @@
 //! Safe native telephone integration boundary. C handles remain private.
 
+#[cfg(any(feature = "native", test))]
+mod blf;
+
 use phone_core::TelephonyStatus;
 
 mod call_journal;

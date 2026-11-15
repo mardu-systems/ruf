@@ -568,6 +568,7 @@ mod tests {
         let mut snapshot = incoming("private-call");
         snapshot.call_account_id = Some(7);
         snapshot.accounts.push(phone_core::AccountSnapshot {
+            monitored_extensions: Vec::new(),
             transport: Default::default(),
             media_security: Default::default(),
             auth_username: None,

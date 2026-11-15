@@ -165,6 +165,9 @@ static void reset_retries_have_bounded_backoff(void) {
     reset_error = EIO;
     assert(tick(false) == EIO);
     assert(resets == 1);
+    /* Even a failed reset has flushed old transport bindings: observers must
+       invalidate their old subscriptions while recovery remains pending. */
+    assert(sip_network_generation() == 1);
     now += 5000;
     assert(sip_network_poll(false) == EIO && resets == 2);
     now += 5000;

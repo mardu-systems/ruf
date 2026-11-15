@@ -84,6 +84,7 @@ impl Lab {
         let mapped = Self::socket();
         engine
             .configure_account(&AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,

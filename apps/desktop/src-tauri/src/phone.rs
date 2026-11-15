@@ -137,6 +137,7 @@ impl PhoneSession {
             let mut keys = BTreeMap::new();
             for saved in &settings.accounts {
                 let mut config = AccountConfig {
+                    monitored_extensions: saved.monitored_extensions.clone(),
                     transport: saved.transport,
                     media_security: saved.media_security,
                     auth_username: saved.auth_username.clone(),
@@ -396,6 +397,7 @@ impl PhoneSession {
         }
         let mut next = self.settings.clone();
         let saved = SavedAccount {
+            monitored_extensions: account.monitored_extensions.clone(),
             transport: account.transport,
             media_security: account.media_security,
             auth_username: account.auth_username.clone(),
@@ -629,6 +631,7 @@ impl PhoneSession {
                 .cloned()
                 .ok_or_else(store::storage_error)?;
             let mut config = AccountConfig {
+                monitored_extensions: saved.monitored_extensions.clone(),
                 transport: saved.transport,
                 media_security: saved.media_security,
                 auth_username: saved.auth_username.clone(),
@@ -803,6 +806,7 @@ impl PhoneState {
             session.load(directory, cache)?;
             let saved = session.activation_account(id)?;
             let config = AccountConfig {
+                monitored_extensions: saved.monitored_extensions.clone(),
                 transport: saved.transport,
                 media_security: saved.media_security,
                 auth_username: saved.auth_username.clone(),
@@ -868,6 +872,7 @@ impl PhoneState {
                 ));
             }
             let account = AccountConfig {
+                monitored_extensions: saved.monitored_extensions.clone(),
                 transport: saved.transport,
                 media_security: saved.media_security,
                 auth_username: saved.auth_username.clone(),
@@ -1065,6 +1070,7 @@ mod tests {
                 None,
                 username.into(),
                 AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1085,6 +1091,7 @@ mod tests {
             Some(first),
             "Renamed".into(),
             AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1188,6 +1195,7 @@ mod credential_tests {
             key: "abcd-1111".into(),
             credentials,
             account: AccountConfig {
+                monitored_extensions: Vec::new(),
                 registrar: "pbx.test:5061".into(),
                 username: "alice".into(),
                 password: String::new(),
@@ -1293,6 +1301,7 @@ mod credential_tests {
                 SaveTarget::Id(None),
                 "Synthetic account".into(),
                 AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1353,6 +1362,7 @@ mod credential_tests {
         store
             .write(&SavedSettings {
                 accounts: vec![SavedAccount {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1406,6 +1416,7 @@ mod credential_tests {
         store
             .write(&SavedSettings {
                 accounts: vec![SavedAccount {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1571,6 +1582,7 @@ mod credential_tests {
         store
             .write(&SavedSettings {
                 accounts: vec![SavedAccount {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1607,6 +1619,7 @@ mod credential_tests {
             id: Some(1),
             name: "Synthetic account".into(),
             account: AccountConfig {
+                monitored_extensions: Vec::new(),
                 transport: Default::default(),
                 media_security: Default::default(),
                 auth_username: None,
@@ -1687,6 +1700,7 @@ mod credential_tests {
                 SaveTarget::Id(None),
                 "Synthetic account".into(),
                 AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1771,6 +1785,7 @@ mod credential_tests {
         store
             .write(&SavedSettings {
                 accounts: vec![SavedAccount {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,
@@ -1807,6 +1822,7 @@ mod credential_tests {
                 SaveTarget::Id(Some(id)),
                 "Replacement".into(),
                 AccountConfig {
+                    monitored_extensions: Vec::new(),
                     transport: Default::default(),
                     media_security: Default::default(),
                     auth_username: None,

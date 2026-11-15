@@ -84,6 +84,75 @@ fn asterisk_dtmf_digits_and_hash_operate_ivr_and_reject_stale_tokens() {
     assert_eq!(current.call_id.as_deref(), Some(third.as_str()));
     lab.hangup(&third);
 }
+#[test]
+#[ignore = "Requires isolated Asterisk; bun run test:asterisk"]
+fn asterisk_blf_observes_real_calls_and_recovers_after_account_restart() {
+    use phone_core::{ExtensionState, MonitoredExtension};
+    let _guard = crate::NATIVE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut lab = Lab::new("blf");
+    let mut account = config("1000");
+    account.monitored_extensions = vec![
+        MonitoredExtension {
+            extension: "1000".into(),
+            name: "Synthetic desk".into(),
+        },
+        MonitoredExtension {
+            extension: "9999".into(),
+            name: "Missing hint".into(),
+        },
+    ];
+    let id = lab.engine.snapshot().unwrap().selected_account_id.unwrap();
+    lab.engine
+        .save_account(Some(id), "BLF fixture", &account)
+        .unwrap();
+    lab.engine.wait_account_update(id).unwrap();
+    let observed = |s: &EngineSnapshot, expected| {
+        s.accounts
+            .iter()
+            .find(|a| a.id == id)
+            .is_some_and(|a| a.monitored_extensions[0].state == expected)
+    };
+    let state = wait(&lab.engine, |s| observed(s, ExtensionState::Idle));
+    assert_eq!(
+        state.accounts[0].monitored_extensions[1].state,
+        ExtensionState::Unknown
+    );
+    cli("channel originate Local/650@lab/n extension 651@lab");
+    let state = wait(&lab.engine, |s| {
+        s.call == CallState::Incoming && observed(s, ExtensionState::Ringing)
+    });
+    let call_id = state.call_id.unwrap();
+    lab.engine.answer_call(&call_id).unwrap();
+    wait(&lab.engine, |s| {
+        s.call == CallState::Active && observed(s, ExtensionState::Busy)
+    });
+    lab.collect();
+    lab.hangup(&call_id);
+    wait(&lab.engine, |s| observed(s, ExtensionState::Idle));
+    lab.engine.set_account_enabled(id, false, None).unwrap();
+    assert!(observed(
+        &lab.engine.snapshot().unwrap(),
+        ExtensionState::Unknown
+    ));
+    lab.engine
+        .set_account_enabled(id, true, Some(&account))
+        .unwrap();
+    wait(&lab.engine, |s| observed(s, ExtensionState::Idle));
+    // A replacement with no monitored targets must retire subscriptions completely.
+    account.monitored_extensions.clear();
+    lab.engine
+        .save_account(Some(id), "BLF fixture", &account)
+        .unwrap();
+    lab.engine.wait_account_update(id).unwrap();
+    assert!(
+        lab.engine.snapshot().unwrap().accounts[0]
+            .monitored_extensions
+            .is_empty()
+    );
+}
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -167,6 +236,7 @@ fn call<'a>(s: &'a EngineSnapshot, id: &str) -> &'a CallSnapshot {
 }
 fn config(username: &str) -> AccountConfig {
     AccountConfig {
+        monitored_extensions: Vec::new(),
         registrar: "127.0.0.1:5070".into(),
         username: username.into(),
         password: std::env::var("SIP_TEST_PASSWORD").expect("synthetic lab password"),

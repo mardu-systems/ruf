@@ -14,6 +14,7 @@ native = ["dep:serde_json"]
 native-test-hooks = ["native"]
 
 [dependencies]
+quick-xml.workspace = true
 phone-core.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

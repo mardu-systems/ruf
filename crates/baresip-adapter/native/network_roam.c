@@ -8,6 +8,7 @@ enum { POLL_MS = 5000, MAX_RETRY_MS = 60000 };
 
 static struct {
     bool pending;
+    unsigned generation;
     unsigned failures;
     uint64_t next_attempt;
 } recovery;
@@ -59,6 +60,8 @@ static int retry_later(uint64_t now, int error) {
     return error;
 }
 
+unsigned sip_network_generation(void) { return recovery.generation; }
+
 void sip_network_reset(void) {
     memset(&recovery, 0, sizeof(recovery));
 }
@@ -93,6 +96,7 @@ int sip_network_poll(bool call_active) {
         return 0;
     }
     if (recovery.pending) {
+        ++recovery.generation;
         error = uag_reset_transp(true, true);
         if (error) return retry_later(now, error);
         recovery.pending = false;

@@ -110,3 +110,26 @@ exactly `1`, and read once at engine creation. No IPC/DTO changes are involved.
 allowlisted output, absence of sensitive fixture headers/passwords and disabled
 behavior against the existing isolated Asterisk lab. Desktop CI runs it after
 the regular interop suite.
+
+BLF uses the existing baresip SIP event socket and `account_auth`, never a
+second SIP stack or an audio module. Each native account owns a `blf.c` group;
+configuration is passed as a validated, bounded newline-separated numeric list.
+Registration evidence starts `dialog` subscriptions with a 300-second requested
+lifetime and `application/dialog-info+xml`. Ordinary successful REGISTER refreshes
+do not restart active subscriptions. Retirement releases subscriptions before
+the owning UA and suppresses late handlers through libre's subscription teardown.
+
+The private BLF callback uses the unchanged event layout: `EV_BLF_NOTIFY` (52)
+borrows a NUL-terminated XML body of at most 65536 bytes in `detail` and the
+extension in `caller_number`; `EV_BLF_UNKNOWN` (53) carries the extension and null
+body. Both carry the owning account ID. Rust copies/consumes the payload within
+the callback; returning one requests deferred full-state resubscription. No
+native pointer or XML body is exposed to the frontend.
+
+The subscription's negotiated NOTIFY expiry bounds observed-state validity;
+quiet unchanged status is retained through that lifetime. Missing initial
+NOTIFY, termination, registration failure and native transport reset invalidate
+state. Retry uses exponential 1–60-second backoff and honors longer Retry-After.
+`bun run test:network-roam` includes decoded SIP-NOTIFY boundary tests for type,
+expiry, pending state, deferred resync and retired handlers, plus bounded target
+validation. Actual authenticated SIP/BLF transitions require the Asterisk suite.

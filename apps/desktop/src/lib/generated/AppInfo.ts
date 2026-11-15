@@ -224,7 +224,37 @@ inputs: Array<AudioDevice>,
  */
 outputs: Array<AudioDevice>, };
 
+export type MonitoredExtension = {
+/**
+ * Exact extension, including significant leading zeros; 1–32 ASCII digits.
+ */
+extension: string,
+/**
+ * Optional display label; defaults to empty, at most 64 characters without controls.
+ */
+name: string, };
+
+export type ExtensionState = "unknown" | "idle" | "ringing" | "busy";
+
+export type MonitoredExtensionSnapshot = {
+/**
+ * Exact subscribed extension, scoped to its parent account.
+ */
+extension: string,
+/**
+ * Saved display label; empty uses the extension as its display name.
+ */
+name: string,
+/**
+ * Current native subscription evidence; resets to unknown after loss/replacement.
+ */
+state: ExtensionState, };
+
 export type AccountConfig = {
+/**
+ * Optional account-scoped BLF targets; omitted legacy input defaults to none.
+ */
+monitoredExtensions: Array<MonitoredExtension>,
 /**
  * DNS name or IPv4 registrar, optionally with a nonzero port.
  */
@@ -408,6 +438,10 @@ name: string | null,
 number: string | null, };
 
 export type AccountSnapshot = {
+/**
+ * Saved BLF targets and their ephemeral native observations.
+ */
+monitoredExtensions: Array<MonitoredExtensionSnapshot>,
 /**
  * Stable, nonzero identity within this engine session.
  */

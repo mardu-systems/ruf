@@ -7,6 +7,9 @@
 /* Clear deferred recovery/backoff before engine startup and after shutdown. */
 void sip_network_reset(void);
 
+/* Increments for each attempted transport reset; native event-loop only. */
+unsigned sip_network_generation(void);
+
 /* Poll every five seconds. An occupied call slot (incoming through closed)
  * defers DNS/address mutations and transport resets. Idle address changes are
  * reconciled before a quiet poll resets transports and re-registers accounts.

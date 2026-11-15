@@ -159,3 +159,12 @@ reports this desktop test as skipped and retains its adapter-only dependencies.
 The full controlled SIP/NAT/blackout suite remains part of final native workspace
 verification. See [call-controls/security verification](../../../docs/verification/2026-11-05-call-controls-security.md)
 for observed results and platform/provider limits.
+
+## Live extension status (BLF)
+
+The lab exposes `1000`/`1001` PJSIP hints in the existing `lab` context. The
+BLF test subscribes through authenticated account 1000, observes idle, incoming
+ringing, confirmed busy and idle after hangup, then disables/re-enables the
+account and removes its target configuration. A missing hint stays unknown.
+These are actual SIP dialog NOTIFY observations, independent of UI fixtures.
+See [the BLF contract](../../../docs/api/blf.md).
