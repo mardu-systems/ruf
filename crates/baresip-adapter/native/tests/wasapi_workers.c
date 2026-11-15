@@ -10,6 +10,11 @@
 #include <re_atomic.h>
 #include "wasapi-stubs/windows.h"
 
+/* Libre's MSVC store macro includes a trailing semicolon. Preserve that shape
+ * with compiler atomics so these workers also catch unbraced if/else failures. */
+#undef re_atomic_store
+#define re_atomic_store(a, v, mo) __atomic_store_n(a, v, mo);
+
 static _Atomic int startup_failure[2], terminal_failure[2], invalidations[2];
 static _Atomic int release_invalidations;
 static _Atomic int default_device[2], opens[2], last_opened[2], live_clients;

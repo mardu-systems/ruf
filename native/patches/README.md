@@ -44,6 +44,9 @@ flag supplies zeroed samples without dereferencing Windows' buffer pointer.
 The portable injected-COM harness compiles the staged production workers, including
 the startup-timeout race and repeated `ReleaseBuffer` invalidation regression;
 physical Windows qualification remains separate.
+The harness also preserves the trailing semicolon in libre's MSVC atomic-store
+macro. Worker status branches use braces so that expansion remains valid before
+`else` on Windows; startup and terminal-error behavior are unchanged.
 
 ## SIP reliability patches
 

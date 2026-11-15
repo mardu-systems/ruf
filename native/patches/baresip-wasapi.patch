@@ -210,7 +210,7 @@ diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
  		hr = IAudioCaptureClient_GetNextPacketSize(service,
  						    &packet_sz);
  		CHECK_HR(hr, "wasapi/src: GetNextPacketSize failed");
-@@ -148,31 +170,70 @@
+@@ -148,31 +170,71 @@
  		af.timestamp = tmr_jiffies_usec();
  		af.sampc = num_frames * format->nChannels;
  
@@ -270,10 +270,11 @@ diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
 +	}
 +	if (enumerator) IMMDeviceEnumerator_Release(enumerator);
 +	if (initialized) CoUninitialize();
-+	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS)
++	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS) {
 +		re_atomic_store(&st->startup, err ? err : ECANCELED, re_memory_order_release);
-+	else if (err && re_atomic_rlx(&st->run))
++	} else if (err && re_atomic_rlx(&st->run)) {
 +		re_atomic_store(&st->error, err, re_memory_order_release);
++	}
  
  	return err;
  }
@@ -294,7 +295,7 @@ diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
  
  int wasapi_src_alloc(struct ausrc_st **stp, const struct ausrc *as,
  		      struct ausrc_prm *prm, const char *device,
-@@ -180,7 +241,7 @@
+@@ -180,7 +242,7 @@
  {
  	struct ausrc_st *st;
  	int err;
@@ -303,7 +304,7 @@ diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
  
  	if (!stp || !as || !prm)
  		return EINVAL;
-@@ -189,6 +250,8 @@
+@@ -189,6 +251,8 @@
  	if (!st)
  		return ENOMEM;
  
@@ -312,7 +313,7 @@ diff --git a/modules/wasapi/src.c b/modules/wasapi/src.c
  	st->rh  = rh;
  	st->arg = arg;
  	st->prm = *prm;
-@@ -206,12 +269,16 @@
+@@ -206,12 +270,16 @@
  		goto out;
  	}
  
@@ -406,7 +407,7 @@ diff --git a/modules/wasapi/play.c b/modules/wasapi/play.c
  		hr = IAudioClient_GetCurrentPadding(client,
  						    &num_frames_padding);
  		CHECK_HR(hr, "wasapi/play: GetCurrentPadding failed");
-@@ -150,22 +169,39 @@
+@@ -150,22 +169,40 @@
  
  		hr = IAudioRenderClient_ReleaseBuffer(service, num_frames, 0);
  		CHECK_HR(hr, "wasapi/play: ReleaseBuffer failed");
@@ -449,14 +450,15 @@ diff --git a/modules/wasapi/play.c b/modules/wasapi/play.c
 +	}
 +	if (enumerator) IMMDeviceEnumerator_Release(enumerator);
 +	if (initialized) CoUninitialize();
-+	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS)
++	if (re_atomic_load(&st->startup, re_memory_order_acquire) == EINPROGRESS) {
 +		re_atomic_store(&st->startup, err ? err : ECANCELED, re_memory_order_release);
-+	else if (err && re_atomic_rlx(&st->run))
++	} else if (err && re_atomic_rlx(&st->run)) {
 +		re_atomic_store(&st->error, err, re_memory_order_release);
++	}
  
  	return err;
  }
-@@ -202,12 +238,15 @@
+@@ -202,12 +239,15 @@
  		goto out;
  	}
  
@@ -472,7 +474,7 @@ diff --git a/modules/wasapi/play.c b/modules/wasapi/play.c
  
  out:
  	if (err)
-@@ -217,3 +256,9 @@
+@@ -217,3 +257,9 @@
  
  	return err;
  }
