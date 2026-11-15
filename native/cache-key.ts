@@ -66,6 +66,12 @@ if (process.platform === "win32") {
   identity.compiler = output("cc", ["--version"]);
   identity.xcode = output("xcodebuild", ["-version"]);
   identity.sdk = output("xcrun", ["--show-sdk-version"]);
+} else if (process.platform === "linux") {
+  identity.compiler = [
+    output("cc", ["--version"]),
+    output("pkg-config", ["--modversion", "openssl", "libpulse"]),
+    output("ldd", ["--version"]),
+  ].join("\n");
 } else {
   throw new Error("Native SDK caching is configured for desktop hosts only");
 }

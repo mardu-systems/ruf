@@ -51,6 +51,11 @@
         "displayLanguageSelector": false
       }
     },
+    "linux": {
+      "deb": {
+        "depends": ["libpulse0", "libayatana-appindicator3-1"]
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "14.0",
       "signingIdentity": "-",
