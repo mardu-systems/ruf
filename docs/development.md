@@ -36,7 +36,9 @@ the Windows SDK and WebView2 as described in the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 Current release targets are macOS 14+ arm64 and Windows 11 x64. Windows hosted
 builds use Windows Server 2022; that is a build environment, not a runtime test
-on Windows 11. Intel macOS, ARM Windows and Linux are not release targets yet.
+on Windows 11. ARM Windows is not a release target yet.
+Intel macOS is not a release target. Linux x64 has experimental DEB/AppImage
+builds; see [Linux setup, limitations and acceptance](linux.md).
 
 `bun run native:build` builds the pinned SDK; `bun run dev:native` starts a
 real native phone. See [native prerequisites](../native/README.md) and the

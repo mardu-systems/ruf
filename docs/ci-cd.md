@@ -19,7 +19,7 @@ Setup does not push, tag or publish a release.
   compilation does not qualify audio, hardware integration or SIP compatibility.
 - **Draft release**: a pushed `v<version>` tag must match package/Cargo versions.
   Versioned notes at `docs/releases/<version>.md` must exist. The same reusable
-  quality checks as branch CI, both native jobs and the Asterisk interoperability
+  quality checks as branch CI, all native jobs and the Asterisk interoperability
   job must pass before a separate write-enabled job downloads this run's two
   installers and creates a **draft prerelease**. It does not publish.
   An existing release is not updated; correct/delete an obsolete draft explicitly
@@ -140,3 +140,17 @@ Both artifact collection and draft creation include one SBOM and one hash manife
 per target. The [hosted verification record](verification/2026-11-10-github-actions.md)
 includes observed Windows/macOS packaging, artifact uploads and independently
 checked installer/SBOM hashes for its stated revision.
+
+## Experimental Linux desktop
+
+The desktop matrix also builds Ubuntu 24.04 x64 with `pulse` system audio and
+DEB/AppImage packaging. Linux prerequisites are installed before fingerprinting
+the SDK; compiler/image/OpenSSL/libpulse identity and all ten patches qualify
+its exact cache key. Linux uses distribution OpenSSL instead of the separate
+macOS/vcpkg cache. Headless Asterisk coverage remains separate.
+
+`bun run test:linux` exercises synthetic OS services on a private D-Bus/Xvfb
+session; it does not qualify physical audio or Wayland. Both Linux installers
+and their compiled inventory/hash evidence are uploaded under the Linux target.
+Release drafts require and attach the Linux packages alongside the existing
+macOS/Windows x64 artifacts. No release is published by these changes.

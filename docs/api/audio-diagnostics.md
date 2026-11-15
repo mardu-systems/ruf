@@ -101,3 +101,22 @@ PCM defaults/scaling, peak normalization, exclusive ownership, stale stop
 requests, two-/ten-second limits, incoming preemption and shutdown. Physical
 macOS capture/playback and Windows runtime behavior require explicit local
 verification; synthetic success does not establish either.
+
+## Linux audio
+
+Native Linux builds use baresip's `pulse` backend, with the same audio commands,
+required device IDs, owner tokens and DTOs. PulseAudio or pipewire-pulse is
+required. Inventory enumerates source/sink names without capturing audio, omits
+monitor sources and returns `nativeFailure` after a three-second failure
+deadline. IDs longer than the existing 127-byte backend limit are not offered.
+Invalid/missing device selections continue to reject without replacing settings.
+
+The microphone permission query returns `unsupported`, which never proves
+capture access. Explicit diagnostic capture determines actual availability.
+Connection/stream startup waits for native acceptance with a three-second bound.
+Terminal audio-server/stream errors are observed on the SIP event loop, end
+active tests/calls with an error and require restarting Ruf before more system
+audio. Teardown retains the owning connection and disables callbacks under its
+lock; workers never destroy/join themselves and output teardown does not wait
+indefinitely for a flush. Test-tone/file interoperability remains independent
+of system-audio availability.

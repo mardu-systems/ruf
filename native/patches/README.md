@@ -3,7 +3,7 @@
 ## Upstream 4.13 compatibility
 
 The exact 4.13.0 baresip/libre release commits are in `native/sources.json`.
-All nine ordered patches remain in the SDK identity. The NAT test registrations
+All ten ordered patches are included in the SDK identity. The NAT test registrations
 now retain upstream's `sip_transp_udp_sock` test, and the call-control header
 extension retains upstream's `call_set_close_headers` declaration. These are
 context changes only; local policy and control implementations are unchanged.
@@ -288,3 +288,21 @@ local incomplete type without introducing an unrelated header dependency. Exact
 patch text remains the SDK compatibility guard and participates in the existing
 ordered patch hashes in the generated native SBOM. Rebuild via
 `bun run native:build` after any tracked patch change.
+
+## Linux PulseAudio foundation
+
+`baresip-pulse.patch` follows the WASAPI patch in every SDK's source identity
+and baresip SBOM hash. Linux builds compile the upstream `pulse` module.
+Connection and stream startup wait for native acceptance for at most three
+seconds. Each stream retains the connection owning its callbacks; reconnects
+cannot redirect destruction to a replacement main loop. Teardown clears native
+callbacks under that loop's lock, drops the stream, then releases its connection.
+The previous unbounded playback flush is omitted during teardown. Negative
+metadata-list completion and null entries are ignored safely. Exact patched
+module sources are staged in `test/pulse` for injected error-callback tests.
+
+A sticky atomic terminal error is set by failed context/stream callbacks. Only
+the SIP event loop observes it and ends tests, ringing and calls through the
+existing adapter errors. Audio workers never destroy/join themselves. Restart
+Ruf after terminal failure; automatic recovery is not claimed. The patch changes
+no SIP protocol behavior or IPC DTO. Rebuild older SDKs before native checks.

@@ -40,12 +40,14 @@ mute/hold/resume APIs. Upstream transmit-thread start/stop helpers are private a
 need no adapter calls. Custom close headers and optional AMR/ZRTP/WebRTC-AEC
 modules are not enabled without a product requirement. The eight existing patches
 remain; only the NAT-test and call-control-header contexts needed rebasing. A ninth
-patch now hardens WASAPI startup, stream recovery and error observation; see the
+patch hardens WASAPI startup, stream recovery and error observation; a tenth
+patch adds bounded PulseAudio startup and safe terminal-failure observation; see the
 [patch contracts](patches/README.md#wasapi-worker-lifetime-and-output-status).
 See the [behavioral contract](../docs/api/sip-events.md#native-sdk-413).
 
 Supported build hosts: macOS arm64, Windows MSVC x64; Linux x64/arm64 is available
-for headless interoperability tests. Cross compilation is not implemented.
+for headless interoperability tests and the experimental Linux desktop foundation.
+See [Linux desktop prerequisites and acceptance](../docs/linux.md). Cross compilation is not implemented.
 
 Desktop CI caches only `native/install/<target>/`, including the SDK's NAT test
 executable. An exact key covers the runner image, compiler/CMake identity, source
@@ -81,7 +83,7 @@ layers are saved only from non-PR runs after SDK qualification; see
   The SDK fetches the exact manifest baseline into that checkout if an older
   runner image lacks it; it does not switch the checkout or advance the pin.
 - Linux: CMake, GCC/Clang, pkg-config and OpenSSL development/static libraries
-  (`sudo apt-get install cmake libssl-dev pkg-config` on Ubuntu).
+  (`sudo apt-get install cmake libssl-dev libpulse-dev pkg-config` on Ubuntu).
 
 `OPENSSL_ROOT_DIR` can select a compatible static OpenSSL installation explicitly.
 The generated SDK manifest records resolved OpenSSL version/prefix, source pins,
@@ -156,7 +158,8 @@ Without `native`, no SDK is needed and telephony reports `notLinked`.
 ## Selected functionality
 
 Static modules: `g711`, `auconv`, `auresamp`, `ausine`, `aufile`, `srtp`, plus `coreaudio`
-on macOS or `wasapi` on Windows. Audio stays entirely within baresip. Test-tone
+on macOS, `wasapi` on Windows or `pulse` on Linux. Linux links the system
+libpulse and also supports PipeWire through pipewire-pulse. Audio stays entirely within baresip. Test-tone
 mode uses 440 Hz input and writes decoded incoming PCM to WAV; system mode uses
 the platform microphone/speaker and requires manual device/permission testing.
 The file player's upstream path buffer allows at most 127 UTF-8 bytes; a longer

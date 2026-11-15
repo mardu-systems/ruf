@@ -44,3 +44,21 @@ the opaque token and its still-live call binding. Existing stale-action checks,
 withdrawal and bounded delivery retry remain in force.
 
 Authorized current contact names apply to incoming captions as “Name ruft an”. Updated or revoked contact references replace the bound caption without changing its action token. The anonymous notification preference still suppresses both contact name and number.
+
+## Linux desktop
+
+The existing commands and DTO fields are unchanged. Linux uses the freedesktop
+notification daemon over the session D-Bus. `authorized` means an available
+service advertises actionable notifications, not proof of per-app permission,
+Do Not Disturb state or visible delivery. The UI labels this as desktop-service
+availability. A missing service or missing action capability is unsupported;
+failed/time-limited reads return `nativeFailure`. Requesting permission never
+opens an OS grant dialog on Linux. The generic settings-pane command returns
+`engineUnavailable`, and the Linux UI omits that action.
+
+Call banners are silent, bounded, escape body markup and use opaque tokens. Only
+actions from the initialized daemon's unique D-Bus sender are accepted; the
+desktop service still checks the current call/token. Withdrawal removes the
+binding before closing the banner. Test banners contain no actions or call
+binding. OS method calls time out after three seconds. Restart Ruf after a
+notification-daemon restart; old daemon IDs cannot bind to a new daemon.
