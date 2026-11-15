@@ -28,6 +28,13 @@ jobs:
             artifact: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             openssl-cache-path: native/build/x86_64-pc-windows-msvc/vcpkg
             openssl-recipe: native/vcpkg.*
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bundle: nsis
+            bundles: nsis
+            artifact: target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+            openssl-cache-path: native/build/aarch64-pc-windows-msvc/vcpkg
+            openssl-recipe: native/vcpkg.*
     env:
       CI: true
       # Preserve the Finder background and drag-to-Applications icon layout.

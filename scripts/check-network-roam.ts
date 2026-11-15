@@ -25,7 +25,9 @@ try {
     "-B",
     build,
     `-DSIP_SDK_PREFIX=${prefix}`,
-    ...(windows ? ["-A", "x64"] : ["-DCMAKE_BUILD_TYPE=Release"]),
+    ...(windows
+      ? ["-A", process.arch === "arm64" ? "ARM64" : "x64"]
+      : ["-DCMAKE_BUILD_TYPE=Release"]),
   ]);
   run("cmake", ["--build", build, "--config", "Release"]);
   run(

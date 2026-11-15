@@ -12,14 +12,16 @@ Setup does not push, tag or publish a release.
   syntax, versions, generated DTOs, frontend typecheck/build and portable Rust
   linting/tests, plus a separate browser-state regression job.
 - **Desktop build**: reusable workflow called by CI and release; macOS arm64 and
-  Windows x64 build the pinned native SDK, run native workspace Clippy/tests and
+  Windows x64/ARM64 build the pinned native SDK, run native workspace Clippy/tests and
   produce DMG/NSIS artifacts with the native feature, plus each target’s compiled
   SBOM and build-hash manifest. A Linux Docker job verifies
   authenticated Asterisk calling and returned 440 Hz RTP audio. Hosted
   compilation does not qualify audio, hardware integration or SIP compatibility.
+  The ARM64 NSIS installer is retained as `desktop-aarch64-pc-windows-msvc` on
+  `windows-11-arm`; it is experimental and is not attached to the release draft.
 - **Draft release**: a pushed `v<version>` tag must match package/Cargo versions.
   Versioned notes at `docs/releases/<version>.md` must exist. The same reusable
-  quality checks as branch CI, both native jobs and the Asterisk interoperability
+  quality checks as branch CI, all native jobs and the Asterisk interoperability
   job must pass before a separate write-enabled job downloads this run's two
   installers and creates a **draft prerelease**. It does not publish.
   An existing release is not updated; correct/delete an obsolete draft explicitly

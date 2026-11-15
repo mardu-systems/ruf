@@ -77,7 +77,9 @@ layers are saved only from non-PR runs after SDK qualification; see
 - Windows: Visual Studio 2022 C++ tools/Windows SDK, CMake and vcpkg.
   Set `VCPKG_INSTALLATION_ROOT` to vcpkg's checkout. GitHub's Windows runner
   supplies it. The manifest uses a pinned baseline and `x64-windows-static-md`
-  OpenSSL, matching the dynamic MSVC CRT used by Rust.
+  or `arm64-windows-static-md`, selected from the native host architecture, for
+  OpenSSL, matching the dynamic MSVC CRT used by Rust. ARM64 requires the Visual
+  Studio ARM64 C++ tools and a native ARM64 Bun/Rust toolchain; x64 remains x64.
   The SDK fetches the exact manifest baseline into that checkout if an older
   runner image lacks it; it does not switch the checkout or advance the pin.
 - Linux: CMake, GCC/Clang, pkg-config and OpenSSL development/static libraries

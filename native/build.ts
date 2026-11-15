@@ -10,15 +10,18 @@ const pins: typeof import("./sources.json") = await Bun.file(
 const targets: Record<string, string> = {
   "darwin-arm64": "aarch64-apple-darwin",
   "win32-x64": "x86_64-pc-windows-msvc",
+  "win32-arm64": "aarch64-pc-windows-msvc",
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
 };
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target)
   throw new Error(
-    "Unsupported native build host; use macOS arm64, Windows x64 or Linux x64/arm64.",
+    "Unsupported native build host; use macOS arm64, Windows x64/arm64 or Linux x64/arm64.",
   );
 const windows = process.platform === "win32";
+const windowsArchitecture = process.arch === "arm64" ? "ARM64" : "x64";
+const windowsTriplet = `${process.arch === "arm64" ? "arm64" : "x64"}-windows-static-md`;
 const build = join(root, "native/build", target);
 const prefix = join(root, "native/install", target);
 const sources = join(root, "native/build/sources");
@@ -159,9 +162,9 @@ if (windows && !openssl) {
     "install",
     `--x-manifest-root=${join(root, "native")}`,
     `--x-install-root=${installed}`,
-    "--triplet=x64-windows-static-md",
+    `--triplet=${windowsTriplet}`,
   ]);
-  openssl = join(installed, "x64-windows-static-md");
+  openssl = join(installed, windowsTriplet);
 }
 const common = [
   "-ULIB_EAY*",
@@ -175,7 +178,11 @@ const common = [
 ];
 if (openssl) common.push(`-DOPENSSL_ROOT_DIR=${resolve(openssl)}`);
 if (windows)
-  common.push("-A", "x64", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL");
+  common.push(
+    "-A",
+    windowsArchitecture,
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+  );
 if (process.platform === "darwin")
   common.push(
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
