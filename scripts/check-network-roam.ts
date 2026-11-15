@@ -46,6 +46,10 @@ try {
   for (const name of ["audio_failures_test", "audio_player_status_test"])
     run(join(build, windows ? `Release/${name}.exe` : name), []);
   if (!windows) run(join(build, "wasapi_workers_test"), []);
+  if (process.platform === "linux") {
+    run(join(build, "pulse_player_metadata_test"), []);
+    run(join(build, "pulse_recorder_metadata_test"), []);
+  }
   run(join(build, windows ? "Release/latency_probe.exe" : "latency_probe"), []);
   if (process.platform === "darwin")
     execFileSync(join(build, "dns_refresh_test"), [], {
