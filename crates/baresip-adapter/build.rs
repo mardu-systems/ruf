@@ -122,6 +122,7 @@ fn build_telephony() {
         ("reReliability", "re-reliability.patch"),
         ("baresipReliability", "baresip-reliability.patch"),
         ("baresipWasapi", "baresip-wasapi.patch"),
+        ("baresipPulse", "baresip-pulse.patch"),
     ] {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../native/patches")
@@ -169,6 +170,22 @@ fn build_telephony() {
             .define("WIN32", None)
             .define("_CRT_SECURE_NO_WARNINGS", None);
     }
+    if target.contains("linux") {
+        assert!(
+            manifest["modules"]
+                .as_array()
+                .is_some_and(|modules| modules.iter().any(|module| module == "pulse")),
+            "Linux SDK needs pulse; run bun run native:build"
+        );
+        let pulse = pkg_config::Config::new()
+            .cargo_metadata(false)
+            .probe("libpulse")
+            .expect("Linux audio requires libpulse-dev");
+        bridge
+            .file("native/audio_devices_linux.c")
+            .includes(pulse.include_paths);
+        println!("cargo:rerun-if-changed=native/audio_devices_linux.c");
+    }
     if std::env::var_os("CARGO_FEATURE_NATIVE_TEST_HOOKS").is_some() {
         bridge.define("SIP_NATIVE_TEST_HOOKS", None);
     }
@@ -179,6 +196,11 @@ fn build_telephony() {
     );
     for library in ["baresip", "re", "ssl", "crypto"] {
         println!("cargo:rustc-link-lib=static={library}");
+    }
+    if target.contains("linux") {
+        pkg_config::Config::new()
+            .probe("libpulse")
+            .expect("Linux audio requires libpulse-dev");
     }
     if target.contains("apple") {
         for framework in [

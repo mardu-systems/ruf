@@ -56,7 +56,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(text(handle, Message::Loading))
         .menu(&tray_menu(handle, &initial)?)
-        .show_menu_on_left_click(cfg!(target_os = "macos"))
+        .show_menu_on_left_click(cfg!(any(target_os = "macos", target_os = "linux")))
         .on_tray_icon_event(|tray, event| {
             if !cfg!(target_os = "macos")
                 && matches!(

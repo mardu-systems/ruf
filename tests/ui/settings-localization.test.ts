@@ -46,6 +46,21 @@ const { default: PermissionStatus } =
   await import("../../apps/desktop/src/lib/components/PermissionStatus.svelte");
 const { message } = await import("../../apps/desktop/src/lib/i18n");
 
+test("Linux notification capability is labelled without claiming a permission grant", () => {
+  locale.set("en");
+  const html = render(PermissionStatus, {
+    props: {
+      title: "Notifications",
+      status: "authorized",
+      authorizedLabel: message("settings.notification_service_available"),
+      oncheck() {},
+    },
+  }).body;
+  expect(html).toContain("Desktop notifications available");
+  expect(html).not.toContain("Permission granted");
+  locale.set("de");
+});
+
 test("stored permission errors translate again after a language change", () => {
   const error = message("settings.contacts_check_failed");
   const props = {

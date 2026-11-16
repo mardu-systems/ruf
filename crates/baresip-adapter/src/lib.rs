@@ -27,6 +27,8 @@ mod contacts;
 #[cfg(feature = "native")]
 #[allow(unsafe_code)]
 mod ffi;
+#[cfg(all(target_os = "linux", feature = "desktop"))]
+mod linux;
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -119,6 +121,7 @@ pub fn contacts_revision() -> u64 {
 /// Accepts 1–1024 UTF-8 bytes without control characters; invalid text returns
 /// `InvalidInput`. macOS pasteboard failures return `NativeFailure`; unsupported
 /// platforms return `EngineUnavailable`. No contact authorization is required.
+/// Linux desktop builds use the existing GTK clipboard with a three-second deadline.
 /// On macOS, call from a blocking worker while the application's main loop runs;
 /// pasteboard work is dispatched synchronously to the main thread when needed.
 pub fn copy_phone_number(number: &str) -> Result<(), phone_core::PhoneError> {
@@ -140,13 +143,19 @@ fn validate_clipboard_text(text: &str) -> Result<(), phone_core::PhoneError> {
 /// `InvalidInput`; native write failures return `NativeFailure`, unsupported
 /// platforms return `EngineUnavailable`. Does not request Contacts authorization.
 /// Call from a blocking worker while the application's main loop runs.
+/// Linux requires the `desktop` feature and a running GTK display/main loop;
+/// unavailable displays or a three-second dispatch timeout return `NativeFailure`.
 pub fn copy_plain_text(text: &str) -> Result<(), phone_core::PhoneError> {
     validate_clipboard_text(text)?;
     #[cfg(target_os = "macos")]
     {
         contacts::copy_text(text)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(target_os = "linux", feature = "desktop"))]
+    {
+        linux::copy_text(text)
+    }
+    #[cfg(not(any(target_os = "macos", all(target_os = "linux", feature = "desktop"))))]
     {
         Err(phone_core::PhoneError::new(
             phone_core::ErrorCode::EngineUnavailable,
@@ -166,6 +175,8 @@ pub const fn status() -> TelephonyStatus {
 }
 
 /// Enumerate current native input/output devices without starting SIP or opening a microphone.
+/// Linux uses the PulseAudio-compatible session server, omits monitor sources and
+/// fails with `NativeFailure` if the inventory cannot finish within three seconds.
 pub fn audio_devices() -> Result<phone_core::AudioDevices, phone_core::PhoneError> {
     #[cfg(feature = "native")]
     {

@@ -2,14 +2,23 @@
 import { execFileSync } from "node:child_process";
 import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve, join } from "node:path";
+import { dirname, resolve, join } from "node:path";
 
 const MAX_PROCESSES = 6;
 const SIP_TIMEOUT =
   /timeout|deadline|without_ack|refused_compensation|bounded_failure|long_local_hold/;
-type Group = { name: string; filter: string[] };
+type Group = { name: string; command: string[]; cwd?: string };
+type Artifact = {
+  executable: string;
+  manifest_path: string;
+  target: { name: string; kind: string[] };
+};
 
-function groupsFor(tests: string[]): Group[] {
+function groupsFor(
+  tests: string[],
+  artifacts: Artifact[],
+  adapter: Artifact,
+): Group[] {
   const nat = tests.filter((test) => test.startsWith("nat_tests::"));
   const sip = tests.filter((test) => test.startsWith("sip_event_tests::"));
   if (!nat.length || !sip.length)
@@ -23,23 +32,30 @@ function groupsFor(tests: string[]): Group[] {
   ];
   const exact = ({ name, test }: (typeof isolated)[number]): Group => ({
     name,
-    filter: ["--lib", test, "--", "--exact", "--test-threads=1"],
+    cwd: dirname(adapter.manifest_path),
+    command: [adapter.executable, test, "--exact", "--test-threads=1"],
   });
   // Begin the longest known waits first; no protocol timer or assertion changes.
   const long = ({ test }: (typeof isolated)[number]) =>
     /blackout|long_local_hold/.test(test);
   return [
     ...isolated.filter(long).map(exact),
-    {
-      name: "remaining",
-      filter: ["--", "--skip", "nat_tests::", "--skip", "sip_event_tests::"],
-    },
+    ...artifacts.map((artifact, i) => ({
+      name: `remaining-${i + 1}`,
+      cwd: dirname(artifact.manifest_path),
+      command: [
+        artifact.executable,
+        ...(artifact === adapter
+          ? ["--skip", "nat_tests::", "--skip", "sip_event_tests::"]
+          : []),
+      ],
+    })),
     {
       name: "sip",
-      filter: [
-        "--lib",
+      cwd: dirname(adapter.manifest_path),
+      command: [
+        adapter.executable,
         "sip_event_tests::",
-        "--",
         "--test-threads=1",
         ...timed.flatMap((test) => ["--skip", test]),
       ],
@@ -64,14 +80,46 @@ export async function checkNativeWorkspace(
       : ["--workspace", "--features", "sip-desktop/native"]),
   ];
   const cargo = (extra: string[]) => [...command.slice(1), ...common, ...extra];
-  execFileSync(command[0], cargo(["--no-run"]), {
-    cwd: root,
-    stdio: "inherit",
-  });
-  const listing = execFileSync(
+  // Discover the exact executables from the one Cargo build. Concurrent Cargo
+  // invocations can rebuild/unlink a test binary while another is about to run it.
+  const build = execFileSync(
     command[0],
-    cargo(["--lib", "--", "--list", "--format=terse"]),
-    { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+    cargo(["--no-run", "--message-format=json-render-diagnostics"]),
+    {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  const artifacts: Artifact[] = build
+    .trim()
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const message = JSON.parse(line);
+      return message.reason === "compiler-artifact" &&
+        message.profile?.test &&
+        message.executable
+        ? [message as Artifact]
+        : [];
+    });
+  const adapter = artifacts.find(
+    (artifact) =>
+      artifact.target.name === "baresip_adapter" &&
+      artifact.target.kind.includes("lib"),
+  );
+  if (!adapter)
+    throw new Error(
+      "Native test discovery requires the adapter test executable",
+    );
+  const listing = execFileSync(
+    adapter.executable,
+    ["--list", "--format=terse"],
+    {
+      cwd: dirname(adapter.manifest_path),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    },
   );
   const tests = [
     ...new Set(
@@ -81,13 +129,17 @@ export async function checkNativeWorkspace(
         .map((line) => line.slice(0, -6)),
     ),
   ];
-  const groups = groupsFor(tests);
+  const groups = groupsFor(tests, artifacts, adapter);
   const directory = mkdtempSync(join(tmpdir(), "ruf-native-tests-"));
-  const run = async ({ name, filter }: Group): Promise<boolean> => {
+  const run = async ({
+    name,
+    command: invocation,
+    cwd = root,
+  }: Group): Promise<boolean> => {
     let log: number | undefined;
     let passed = false;
     const started = Date.now();
-    console.log(`[native:${name}] START ${filter.join(" ")}`);
+    console.log(`[native:${name}] START ${invocation.join(" ")}`);
     const stream = async (source: ReadableStream<Uint8Array>) => {
       const decoder = new TextDecoder();
       const display = (text: string) => {
@@ -103,8 +155,8 @@ export async function checkNativeWorkspace(
     };
     try {
       log = openSync(join(directory, `${name}.log`), "w");
-      const child = Bun.spawn([...command, ...common, ...filter], {
-        cwd: root,
+      const child = Bun.spawn(invocation, {
+        cwd,
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
@@ -154,6 +206,9 @@ export async function checkNativeWorkspace(
       }
     }),
   );
+  // rustdoc compiles its own harnesses: keep Cargo outside the parallel pool.
+  if (!(await run({ name: "doc", command: [...command, ...common, "--doc"] })))
+    success = false;
   if (!success) {
     console.error(`Native checks failed; logs: ${directory}`);
   } else {

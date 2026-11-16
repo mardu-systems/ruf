@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ruf
+Exec=sip-desktop
+Icon=sip-desktop
+StartupWMClass=sip-desktop
+Terminal=false
+NoDisplay=true

@@ -107,6 +107,7 @@ test("native SDK identity and linkage validation also run without an installed S
       reReliability: "re reliability fixture",
       baresipReliability: "baresip reliability fixture",
       baresipWasapi: "baresip WASAPI fixture",
+      baresipPulse: "baresip PulseAudio fixture",
     },
     modules: ["g711", "coreaudio"],
   };
@@ -152,6 +153,7 @@ test("native SDK identity and linkage validation also run without an installed S
           sdk.patches.baresipSecurity,
           sdk.patches.baresipReliability,
           sdk.patches.baresipWasapi,
+          sdk.patches.baresipPulse,
         ]),
       )
       .digest("hex"),

@@ -9,6 +9,8 @@ publish = false
 
 [features]
 default = []
+# GTK clipboard only; headless/portable adapter checks do not enable this feature.
+desktop = ["dep:gtk"]
 native = ["dep:serde_json"]
 # Explicit native harness only; never enabled by desktop builds.
 native-test-hooks = ["native"]
@@ -16,6 +18,13 @@ native-test-hooks = ["native"]
 [dependencies]
 quick-xml.workspace = true
 phone-core.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+zbus = { version = "5.19", default-features = false, features = [
+  "blocking-api",
+  "async-io",
+] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 libc.workspace = true
@@ -36,6 +45,7 @@ windows = { version = "0.62.2", features = [
 
 [build-dependencies]
 cc = { version = "1" }
+pkg-config = "0.3"
 serde_json = { workspace = true, optional = true }
 
 [lints]

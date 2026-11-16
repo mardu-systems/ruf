@@ -231,3 +231,12 @@ Other countries, short extensions and service codes retain conservative exact
 matching. Multiple source contacts owning equivalent forms yield no identity.
 The conservative `resolve_contact` API remains unchanged; desktop projections use
 `resolve_contact_with_preferences` and its matching-key helper.
+
+## Linux clipboard and contacts
+
+System contacts and their permission queries remain `unsupported` on Linux.
+`copy_phone_number` keeps its existing validation and now has a native Linux
+GTK clipboard fallback in desktop builds. It runs on the existing application
+main loop and returns `nativeFailure` if no display is available or the
+three-second deadline expires. It does not require contacts permission, start
+SIP, capture audio, or execute an external clipboard/shell command.

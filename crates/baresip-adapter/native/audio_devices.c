@@ -50,6 +50,10 @@ static int coreaudio_name_count(const char *name, bool input) {
 }
 #endif
 
+#ifdef __linux__
+extern int sip_linux_audio_devices(sip_audio_device_h *, void *);
+#endif
+
 int sip_audio_devices(sip_audio_device_h *callback, void *arg) {
     if (!callback) return EINVAL;
 #ifdef __APPLE__
@@ -109,6 +113,8 @@ int sip_audio_devices(sip_audio_device_h *callback, void *arg) {
     if (enumerator) IMMDeviceEnumerator_Release(enumerator);
     if (SUCCEEDED(initialized)) CoUninitialize();
     return error;
+#elif defined(__linux__)
+    return sip_linux_audio_devices(callback, arg);
 #else
     (void)arg;
     return ENOTSUP;

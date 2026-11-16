@@ -34,9 +34,17 @@ See [localization contracts](api/localization.md) and the locale-specific
 On macOS install Xcode/Command Line Tools. On Windows install MSVC C++ Build Tools,
 the Windows SDK and WebView2 as described in the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
-Current release targets are macOS 14+ arm64 and Windows 11 x64. Windows hosted
+Release build targets include macOS 14+ ARM64/Intel, Linux GNU x64/ARM64 and
+Windows 11 x64. See the [platform and package matrix](platforms.md). Windows hosted
 builds use Windows Server 2022; that is a build environment, not a runtime test
-on Windows 11. Intel macOS, ARM Windows and Linux are not release targets yet.
+on Windows 11. Windows ARM64 has an additional native CI build on Windows 11 ARM;
+its installer is experimental and requires hardware audio/SIP acceptance.
+Linux x64 and ARM64 have experimental DEB/RPM/AppImage
+builds; see [Linux setup, limitations and acceptance](linux.md).
+
+On a Windows ARM64 host with ARM64 Bun and Rust, run `bun run native:build`, then
+`bun run desktop:build --target aarch64-pc-windows-msvc --bundles nsis --features native`.
+The SDK and desktop target must match; this does not cross-compile an x64 SDK.
 
 `bun run native:build` builds the pinned SDK; `bun run dev:native` starts a
 real native phone. See [native prerequisites](../native/README.md) and the
@@ -64,7 +72,7 @@ Bun formatter and `cargo fmt` for source and
 documentation. The `desktop:build` wrapper always supplies a concrete Rust target
 (defaulting to the host), so release bundles are under
 `target/<triple>/release/bundle`. The macOS examples below use the supported
-Apple Silicon target, `aarch64-apple-darwin`.
+native macOS target (`aarch64-apple-darwin` or `x86_64-apple-darwin`).
 
 If macOS packaging reports that `rust-objcopy` cannot load `libLLVM.dylib`, first
 check the helper in the pinned Rustup toolchain. A local 1.98.1 installation had

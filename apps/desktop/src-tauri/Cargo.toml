@@ -8,7 +8,9 @@ license.workspace = true
 publish = false
 
 [features]
-default = []
+# Expose the tray to Tauri's package dependency discovery as well as Cargo.
+default = ["tray-icon"]
+tray-icon = ["tauri/tray-icon"]
 native = ["baresip-adapter/native"]
 app-store = ["native"]
 
@@ -28,7 +30,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 phone-core.workspace = true
-baresip-adapter.workspace = true
+baresip-adapter = { workspace = true, features = ["desktop"] }
 serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
@@ -36,6 +38,13 @@ getrandom = "0.4"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 keyring = "4.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.2", features = ["rt-async-io-crypto-rust"] }
+zbus = { version = "5.19", default-features = false, features = [
+  "blocking-api",
+  "async-io",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"

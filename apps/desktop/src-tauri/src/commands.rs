@@ -500,10 +500,10 @@ fn open_permission_settings(microphone: bool) -> Result<(), PhoneError> {
     #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = microphone;
-        return Err(PhoneError::new(
+        Err(PhoneError::new(
             ErrorCode::EngineUnavailable,
             "System permission settings are unavailable on this platform.",
-        ));
+        ))
     }
     #[cfg(any(target_os = "macos", windows))]
     if result.is_ok_and(|status| status.success()) {

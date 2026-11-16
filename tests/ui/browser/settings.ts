@@ -16,8 +16,15 @@ export default async function settingsRegressions(
   await page.addInitScript(() => {
     window.isTauri = true;
     const scenario = new URLSearchParams(location.search).get("scenario");
-    if (scenario === "windows-audio")
-      Object.defineProperty(navigator, "platform", { value: "Win32" });
+    // Permission scenarios model macOS independently of the browser host OS.
+    Object.defineProperty(navigator, "platform", {
+      value:
+        scenario === "windows-audio"
+          ? "Win32"
+          : scenario === "linux-notifications"
+            ? "Linux aarch64"
+            : "MacIntel",
+    });
     const soundSettings: FixtureSnapshot["soundSettings"] = {
       inputDevice: "",
       outputDevice: "",
@@ -84,11 +91,13 @@ export default async function settingsRegressions(
       snapshot.lastError = saved.lastError;
     }
     const notificationPermission =
-      scenario === "notification-permission"
-        ? "notDetermined"
-        : scenario === "notification-denied"
-          ? "denied"
-          : "unsupported";
+      scenario === "linux-notifications"
+        ? "authorized"
+        : scenario === "notification-permission"
+          ? "notDetermined"
+          : scenario === "notification-denied"
+            ? "denied"
+            : "unsupported";
     const desktop: Window["__settingsTest"]["desktop"] = {
       autostartEnabled: false,
       autostartAvailable: true,
@@ -96,7 +105,9 @@ export default async function settingsRegressions(
         scenario === "notification-permission" ||
         scenario === "notification-denied",
       notificationsGranted:
-        notificationPermission === "unsupported" ? null : false,
+        notificationPermission === "unsupported"
+          ? null
+          : notificationPermission === "authorized",
       notificationPermission,
     };
     const callbacks = new Map<number, FixtureCallback>();
@@ -1663,6 +1674,45 @@ export default async function settingsRegressions(
         "Mein Entwurf"
       )
         throw Error("Removed account draft was lost");
+    },
+  );
+  await check(
+    "Linux reports notification service capability without a macOS permission pane",
+    "linux-notifications",
+    async () => {
+      await page
+        .getByRole("button", { name: "Mitteilungen", exact: true })
+        .click();
+      await page
+        .getByText("Desktop-Benachrichtigungen verfügbar", { exact: true })
+        .waitFor();
+      await page
+        .getByText(
+          "Dein Desktop unterstützt Benachrichtigungen mit Anrufaktionen.",
+          { exact: false },
+        )
+        .waitFor();
+      if (
+        await page
+          .getByRole("button", {
+            name: "Systemeinstellungen öffnen",
+            exact: true,
+          })
+          .count()
+      )
+        throw new Error(
+          "Linux offers an unsupported notification settings pane",
+        );
+      if (
+        await page.evaluate(() =>
+          window.__settingsTest.commands.some(
+            ({ command }) => command === "request_notification_permission",
+          ),
+        )
+      )
+        throw new Error(
+          "Reading Linux notification capability requested permission",
+        );
     },
   );
   await check(

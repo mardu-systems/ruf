@@ -1,33 +1,40 @@
 name: Desktop build
 on:
   workflow_call:
+    inputs:
+      full-matrix:
+        description: Build both CPUs per OS; PR callers select one native target per OS.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 jobs:
+  targets:
+    name: Select desktop targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - id: matrix
+        run: bun scripts/desktop-matrix.ts ${{ inputs.full-matrix && 'full' || 'pr' }}
+
   build:
     name: ${{ matrix.target }}
+    needs: targets
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            bundle: dmg
-            bundles: app,dmg
-            artifact: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            openssl-cache-path: native/build/openssl-macos14/install
-            openssl-recipe: native/build-openssl-macos.sh
-          - runner: windows-2022
-            target: x86_64-pc-windows-msvc
-            bundle: nsis
-            bundles: nsis
-            artifact: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            openssl-cache-path: native/build/x86_64-pc-windows-msvc/vcpkg
-            openssl-recipe: native/vcpkg.*
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
     env:
       CI: true
       # Preserve the Finder background and drag-to-Applications icon layout.
@@ -38,6 +45,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Verify native host architecture
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          task_rust_host=$(rustc -vV | sed -n 's/^host: //p')
+          test "$task_rust_host" = "${{ matrix.target }}"
+      - name: Install Linux desktop and audio prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config file libssl-dev libpulse-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf libfuse2 dbus-x11 gnome-keyring pulseaudio pulseaudio-utils xvfb xauth x11-utils python3-dbus python3-gi rpm
       - name: Install the desktop target
         run: rustup target add ${{ matrix.target }}
       - name: Fingerprint the native compiler toolchain
@@ -48,12 +66,12 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: native/install/${{ matrix.target }}
-          key: native-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.native-toolchain.outputs.fingerprint }}-${{ hashFiles('native/*.ts', 'native/*.sh', 'native/sources.json', 'native/vcpkg.json', 'native/patches/**', 'native/openssl-probe/**', 'scripts/check-native-sdk.ts', '.github/workflows/desktop-build.yml', '.bun-version', 'rust-toolchain.toml') }}
+          key: native-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.native-toolchain.outputs.fingerprint }}-${{ hashFiles('native/*.ts', 'native/*.sh', 'native/sources.json', 'native/vcpkg.json', 'native/patches/**', 'native/openssl-probe/**', 'scripts/check-native-sdk.ts', '.bun-version', 'rust-toolchain.toml') }}
       - name: Validate the restored SDK and rerun its NAT regressions
         if: steps.native-sdk.outputs.cache-hit == 'true'
         run: bun scripts/check-native-sdk.ts ${{ matrix.target }}
       - name: Restore OpenSSL independently of the SIP SDK
-        if: steps.native-sdk.outputs.cache-hit != 'true'
+        if: runner.os != 'Linux' && steps.native-sdk.outputs.cache-hit != 'true'
         id: openssl
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
@@ -62,7 +80,7 @@ jobs:
       - name: Select the macOS OpenSSL prefix
         if: runner.os == 'macOS' && steps.native-sdk.outputs.cache-hit != 'true'
         shell: bash
-        run: echo "OPENSSL_ROOT_DIR=$GITHUB_WORKSPACE/native/build/openssl-macos14/install" >> "$GITHUB_ENV"
+        run: echo "OPENSSL_ROOT_DIR=$GITHUB_WORKSPACE/${{ matrix.openssl-prefix }}" >> "$GITHUB_ENV"
       - name: Build OpenSSL for the macOS deployment target
         if: runner.os == 'macOS' && steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true'
         shell: bash
@@ -71,18 +89,17 @@ jobs:
         if: steps.native-sdk.outputs.cache-hit != 'true'
         run: bun run native:build
       - name: Save the qualified native SDK before app checks
-        if: steps.native-sdk.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        if: steps.native-sdk.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: native/install/${{ matrix.target }}
           key: ${{ steps.native-sdk.outputs.cache-primary-key }}
       - name: Save qualified OpenSSL independently of the SIP SDK
-        if: steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        if: runner.os != 'Linux' && steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ matrix.openssl-cache-path }}
           key: ${{ steps.openssl.outputs.cache-primary-key }}
-      - run: bun run check:versions
       - run: bun run test:network-roam
       - name: Verify macOS service timeout recovery
         if: runner.os == 'macOS'
@@ -90,19 +107,18 @@ jobs:
           bun run test:macos-contact-timeouts
           bun run test:macos-notification-timeouts
           bun run test:macos-login-item
-      - run: bun run types:generate
-      - name: Verify generated contracts are current
-        run: git diff --exit-code -- apps/desktop/src/lib/generated
-      - run: bun run format:check
+      # Linux runs these centrally; retain OS-sensitive tooling coverage once per other OS.
       - run: bun run test:ui
-      - run: bun run check
-      - run: bun run build
+        if: matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-pc-windows-msvc'
       - run: cargo clippy --locked --workspace --all-targets --features sip-desktop/native -- -D warnings
       - run: bun run test:native
         env:
           TMPDIR: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
+      - name: Verify isolated Linux desktop services
+        if: runner.os == 'Linux'
+        run: bun run test:linux
       - name: Retain synthetic PCM after a failed native check
         if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -116,6 +132,13 @@ jobs:
           retention-days: 7
       - name: Build the installer
         run: bun run desktop:build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --features native
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+      - name: Verify Linux desktop startup
+        if: runner.os == 'Linux'
+        run: |
+          bash tests/interop/linux/bundles.sh ${{ matrix.target }}
+          xvfb-run -a dbus-run-session -- bash tests/interop/linux/startup.sh target/${{ matrix.target }}/release/sip-desktop
       - name: Verify signed microphone permissions
         if: runner.os == 'macOS'
         run: bun run test:macos-audio target/${{ matrix.target }}/release/bundle/macos/Ruf.app
@@ -129,6 +152,7 @@ jobs:
             ${{ matrix.artifact }}
             target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.cdx.json
             target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.build.json
+            ${{ matrix.extra-evidence }}
           if-no-files-found: error
           retention-days: 14
 
@@ -142,11 +166,9 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Install native build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev libpulse-dev pkg-config
       - run: bun run native:build
-      - run: bun run test:native --adapter
       - run: bun run test:asterisk
-      - run: bun run test:network-roam
       - run: bun run test:sip-diagnostics
       - name: Lab diagnostics
         if: failure()

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t, text, message, type MessageValue } from "../i18n";
   import { onMount } from "svelte";
+  const isLinux =
+    typeof navigator !== "undefined" && /Linux/.test(navigator.platform);
   import { isTauri } from "@tauri-apps/api/core";
   import type { NotificationPermission } from "../generated/AppInfo";
   import {
@@ -178,9 +180,14 @@
   working={requesting}
   error={$text(permissionError)}
   requestLabel={$t("settings.allow_notifications")}
+  authorizedLabel={message(
+    isLinux
+      ? "settings.notification_service_available"
+      : "settings.permission_allowed",
+  )}
   oncheck={() => void check()}
   onrequest={() => void request()}
-  onopen={isTauri() ? () => void open() : undefined}
+  onopen={isTauri() && !isLinux ? () => void open() : undefined}
 />
 {#if actionError}<p class="settings-feedback error" role="alert">
     {$text(actionError)}
@@ -188,7 +195,11 @@
 {#if permission === "denied"}<p class="settings-feedback">
     {$t("settings.notifications_denied")}
   </p>{:else if permission === "authorized"}<p class="settings-footnote">
-    {$t("settings.notifications_allowed")}
+    {$t(
+      isLinux
+        ? "settings.linux_notifications_help"
+        : "settings.notifications_allowed",
+    )}
   </p>{:else if permission === "unsupported"}<p class="settings-footnote">
     {$t("settings.notifications_unavailable")}
   </p>{/if}

@@ -51,6 +51,25 @@
         "displayLanguageSelector": false
       }
     },
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/applications/sip-desktop.desktop": "linux/appimage.desktop"
+        }
+      },
+      "deb": {
+        "depends": ["libpulse0", "libayatana-appindicator3-1"],
+        "files": {
+          "/usr/share/applications/sip-desktop.desktop": "linux/sip-desktop.desktop"
+        }
+      },
+      "rpm": {
+        "depends": ["libpulse.so.0()(64bit)"],
+        "files": {
+          "/usr/share/applications/sip-desktop.desktop": "linux/sip-desktop.desktop"
+        }
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "14.0",
       "signingIdentity": "-",

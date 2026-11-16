@@ -11,16 +11,18 @@ Setup does not push, tag or publish a release.
   The reusable `quality.yml` runs portable Linux checks for formatting, workflow
   syntax, versions, generated DTOs, frontend typecheck/build and portable Rust
   linting/tests, plus a separate browser-state regression job.
-- **Desktop build**: reusable workflow called by CI and release; macOS arm64 and
-  Windows x64 build the pinned native SDK, run native workspace Clippy/tests and
-  produce DMG/NSIS artifacts with the native feature, plus each target’s compiled
+- **Desktop build**: reusable workflow called by CI and release; macOS ARM64/Intel and Linux GNU x64/ARM64 plus
+  Windows x64/ARM64 build the pinned native SDK, run native workspace Clippy/tests and
+  produce target-specific installers with the native feature, plus each target’s compiled
   SBOM and build-hash manifest. A Linux Docker job verifies
   authenticated Asterisk calling and returned 440 Hz RTP audio. Hosted
   compilation does not qualify audio, hardware integration or SIP compatibility.
+  The ARM64 NSIS installer is retained as `desktop-aarch64-pc-windows-msvc` on
+  `windows-11-arm`; it is experimental and is not attached to the release draft.
 - **Draft release**: a pushed `v<version>` tag must match package/Cargo versions.
   Versioned notes at `docs/releases/<version>.md` must exist. The same reusable
-  quality checks as branch CI, both native jobs and the Asterisk interoperability
-  job must pass before a separate write-enabled job downloads this run's two
+  quality checks as branch CI, all native jobs and the Asterisk interoperability
+  job must pass before a separate write-enabled job downloads this run's selected native
   installers and creates a **draft prerelease**. It does not publish.
   An existing release is not updated; correct/delete an obsolete draft explicitly
   before retrying draft creation. [0.1.1 notes](releases/0.1.1.md) describe this
@@ -28,6 +30,23 @@ Setup does not push, tag or publish a release.
   `SHA256SUMS` with plain installer filenames, verifiable after downloading all
   installers and the checksum file into the same directory. Matching per-target
   SBOM and build-hash manifests are also attached. Checksums do not authenticate a publisher.
+
+Pull requests build three native desktop targets: Linux x64, macOS ARM64 and
+Windows x64. Pushes to the main/foundation branch, manual CI runs and releases
+retain all six CPU/OS combinations. The reusable desktop workflow defaults its
+`full-matrix` input to true; the PR caller explicitly selects false. A lightweight
+target-selection job uses `scripts/desktop-matrix.ts`, without installing Rust or
+frontend dependencies. Package formats, runners and cache paths have one shared
+definition for both scopes.
+
+Formatting, generated contracts and frontend type checks run once in Portable
+checks. UI unit tests run there and once on macOS ARM64/Windows x64 to retain
+OS-sensitive tooling coverage. Each native build retains workspace Clippy/tests,
+network/media regressions, OS-service checks, installer generation and applicable
+bundle/startup/permission checks. Tauri's existing `beforeBuildCommand` supplies
+the target-specific frontend build; no separate duplicate build precedes it.
+The Asterisk job keeps the complete SIP/RTP/TLS/SRTP lab and diagnostics, while
+the desktop jobs own the native unit suite and network-roam checks.
 
 macOS builds request both `app,dmg`: Tauri retains Ruf.app so the signature and
 permission checks run against the finished bundle before uploading the DMG.
@@ -37,9 +56,11 @@ Desktop jobs allow 60 minutes: the first complete cold Windows run took almost
 This is a cold-build budget. The installed native SDK is cached separately with
 an exact compiler/image/input key and saved immediately after qualification.
 Cache hits reuse the existing manifest/archive checks and rerun its two NAT
-regressions; application compilation and tests remain unconditional. Rust
-dependency caches are also saved after failed non-PR runs so a later test failure
-does not force the same dependency compilation again.
+regressions; application compilation and tests remain unconditional. CI workflow
+edits alone do not invalidate the SDK: keys still cover its actual recipes,
+sources, patches, target and compiler/image identity. Rust dependency caches are
+also saved after failed trusted runs and same-repository PR runs so a later test
+failure does not force the same dependency compilation again.
 
 When the SDK misses, OpenSSL has its own exact cache: the macOS static install is
 keyed by `native/build-openssl-macos.sh`, Windows' vcpkg install by
@@ -48,17 +69,22 @@ without SIP pins, patches or application sources. No fallback keys are used.
 The macOS recipe retains its checksum, minimum OS, static flags and full OpenSSL
 tests; Windows still runs its pinned vcpkg manifest installation. Existing SDK
 discovery validates headers, archives and macOS object deployment metadata before
-use. OpenSSL is saved after SDK qualification, before app checks, only on non-PR
-runs. A complete SDK hit skips this OpenSSL restore/build path. The first run
-must populate the independent cache; PRs do not publish trusted shared caches.
+use. OpenSSL is saved after SDK qualification, before app checks. A complete SDK
+hit skips this OpenSSL restore/build path. Cache writes are allowed on non-PR
+runs and same-repository PRs; fork PRs remain restore-only. GitHub scopes PR
+caches to that PR's merge ref, so the base branch and other PRs cannot restore
+them. PRs therefore do not publish trusted branch caches. See
+[GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
 
 Native test execution builds once, discovers the compiled native unit tests and
-runs at most six test processes through `bun run test:native`. Linux uses
-`--adapter`. Each NAT test and named SIP timeout/deadline case runs with an exact
+runs at most six test processes through `bun run test:native` in each selected
+desktop job. Each NAT test and named SIP timeout/deadline case runs with an exact
 filter in its own process; the longest blackout/hold cases start first. Ordinary
 SIP tests share a serial process, skipping the individually scheduled cases.
-Workspace/integration/doc tests remain in the remaining partition. All partitions
-must pass; ignored tests retain their ordinary Cargo behavior, all protocol timers
+Cargo JSON identifies all compiled test executables, which run directly without
+concurrent Cargo builds. Remaining workspace/integration executables are included;
+doc tests run through Cargo after every executable has exited. All partitions
+and doc tests must pass; ignored tests retain their ordinary Cargo behavior, all protocol timers
 and assertions stay unchanged, and Asterisk still runs its opt-in scenarios.
 
 Each process's stdout and stderr are streamed immediately with a `[native:…]`
@@ -140,3 +166,25 @@ Both artifact collection and draft creation include one SBOM and one hash manife
 per target. The [hosted verification record](verification/2026-11-10-github-actions.md)
 includes observed Windows/macOS packaging, artifact uploads and independently
 checked installer/SBOM hashes for its stated revision.
+
+## Experimental Linux desktop
+
+The desktop matrix builds Ubuntu 22.04 x64/ARM64 with `pulse` system audio and
+DEB/RPM/AppImage packaging; macOS jobs cover Apple Silicon and Intel separately. Linux prerequisites are installed before fingerprinting
+the SDK; compiler/image/OpenSSL/libpulse identity and all ten patches qualify
+its exact cache key. Linux uses distribution OpenSSL instead of the separate
+macOS/vcpkg cache. Headless Asterisk coverage remains separate.
+
+`bun run test:linux` exercises synthetic OS services on a private D-Bus/Xvfb
+session; it does not qualify physical audio or Wayland. All Linux installers
+and their compiled inventory/hash evidence are uploaded under the Linux target.
+Release drafts require and attach the Linux packages alongside
+both macOS architectures and Windows x64 artifacts; the experimental Windows ARM64
+artifact remains separate. No release is published by these changes.
+
+The release collector (`bun scripts/release-artifacts.ts artifacts <tag>`) requires
+five native targets: both macOS CPUs, both Linux CPUs and Windows x64. It validates
+release version/context and every package/SBOM hash before emitting asset paths.
+Linux sidecars must agree across DEB/RPM/AppImage. Missing/mixed/tampered assets
+fail before draft creation. The SHA256SUMS file also covers the metadata assets.
+See [platform coverage](platforms.md) for compatibility and validation boundaries.
