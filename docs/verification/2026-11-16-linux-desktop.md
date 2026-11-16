@@ -92,10 +92,12 @@ post-fix graphical icon check is still open. Fedora's isolated startup sessions
 also logged an accessibility-bus activation permission warning. SELinux remained
 enforcing; complete accessibility acceptance is not claimed.
 
-The unmodified Linux Asterisk runner also selects ignored Linux service tests
-without their private session. Earlier interop runs required a VM-only selection
+At this stage, the original Linux Asterisk runner selected ignored Linux service
+tests without their private session. Earlier interop runs required a VM-only selection
 adjustment; a separate TLS test showed a bounded-observation timing issue. These
 are recorded limitations, not claims that the unmodified full lab runner passed.
+The subsequent [Linux lab verification](2026-11-16-linux-lab.md) records the
+repository fixes and a successful complete run of the regular runner.
 No new x86_64 Linux execution, hosted CI, physical hardware qualification or
 Windows runtime verification is established by this record.
 

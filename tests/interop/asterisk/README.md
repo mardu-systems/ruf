@@ -69,6 +69,19 @@ cover simultaneous registrations, outgoing account selection, an incoming call
 to the other account, manual answer/hangup, independent removal and native call
 guards. These accounts are local test identities, never production credentials.
 
+The ignored-test invocation selects both `asterisk_tests::` and
+`engine::interop_tests::` explicitly. Unrelated ignored OS-service tests are not
+lab tests; Linux notification, credential, clipboard and virtual-audio checks run
+separately with `bun run test:linux` in their own private desktop-service session.
+The controlled TLS/security tests run separately without `--ignored`. Packet
+assertions wait for the remote peer's observation within the existing bounded
+fixture wait; local call teardown alone does not establish that the peer logged
+the BYE.
+
+The [Linux lab verification](../../../docs/verification/2026-11-16-linux-lab.md)
+records the failing reproductions and the complete regular-runner result after
+these fixes.
+
 Extension `601` answers, waits one second and hangs up from the PBX. The remote
 hangup test uses reserved lab account `1001`: two successive outgoing calls and
 one answered incoming call must return to `idle`, clear `callAccountId`, stop

@@ -152,6 +152,9 @@ run(
     "native-test-hooks",
     "--lib",
     "--",
+    // Only lab tests: Linux desktop services have their own isolated session runner.
+    "asterisk_tests::",
+    "engine::interop_tests::",
     "--ignored",
     "--test-threads=1",
     "--nocapture",
