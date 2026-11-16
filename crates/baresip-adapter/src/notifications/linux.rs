@@ -14,6 +14,8 @@ use zbus::{
 
 const DESTINATION: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
+// Match the installed icon and hidden desktop entry used by GTK's Wayland app id.
+const DESKTOP_ENTRY: &str = "sip-desktop";
 const MAX_BANNERS: usize = 32;
 static SERVICE: OnceLock<Service> = OnceLock::new();
 static INIT: Mutex<()> = Mutex::new(());
@@ -21,7 +23,6 @@ static INIT: Mutex<()> = Mutex::new(());
 struct Service {
     connection: Connection,
     owner: String,
-    app_id: String,
     bindings: Arc<Mutex<BTreeMap<u32, String>>>,
 }
 
@@ -42,7 +43,7 @@ fn proxy(service: &Service) -> Result<Proxy<'_>, PhoneError> {
     .map_err(|_| failure())
 }
 
-pub(super) fn init(sender: Sender<CallNotificationAction>, app_id: &str) -> Result<(), PhoneError> {
+pub(super) fn init(sender: Sender<CallNotificationAction>) -> Result<(), PhoneError> {
     let _init = INIT.lock().map_err(|_| failure())?;
     if SERVICE.get().is_some() {
         return Ok(());
@@ -108,7 +109,6 @@ pub(super) fn init(sender: Sender<CallNotificationAction>, app_id: &str) -> Resu
         .set(Service {
             connection,
             owner,
-            app_id: app_id.to_owned(),
             bindings,
         })
         .map_err(|_| failure())
@@ -180,7 +180,7 @@ fn notify(
     }
     let hints = HashMap::from([
         ("suppress-sound", Value::from(true)),
-        ("desktop-entry", Value::from(service.app_id.as_str())),
+        ("desktop-entry", Value::from(DESKTOP_ENTRY)),
         ("urgency", Value::from(2u8)),
     ]);
     // Notification bodies may support markup. Keep caller/account text literal.
@@ -194,7 +194,7 @@ fn notify(
             &(
                 "Ruf",
                 previous,
-                service.app_id.as_str(),
+                DESKTOP_ENTRY,
                 title,
                 body,
                 actions,
@@ -258,7 +258,7 @@ mod tests {
     fn linux_notification_service_binds_actions_and_withdraws_stale_banners() {
         assert_eq!(std::env::var("RUF_LINUX_TEST_SESSION").as_deref(), Ok("1"));
         let (sender, receiver) = std::sync::mpsc::channel();
-        init(sender, "org.rufapp.desktop").unwrap();
+        init(sender).unwrap();
         assert_eq!(permission().unwrap(), NotificationPermission::Authorized);
         show(
             "opaque-a",
@@ -270,6 +270,9 @@ mod tests {
         .unwrap();
         let service = SERVICE.get().unwrap();
         let daemon = proxy(service).unwrap();
+        let (icon, desktop_entry): (String, String) = daemon.call("Identity", &()).unwrap();
+        assert_eq!(icon, "sip-desktop");
+        assert_eq!(desktop_entry, "sip-desktop");
         let (id, body, actions, silent): (u32, String, Vec<String>, bool) =
             daemon.call("Recorded", &()).unwrap();
         assert_eq!(body, "&lt;caller&gt;&amp;number");
@@ -325,7 +328,7 @@ mod tests {
         assert_eq!(std::env::var("RUF_LINUX_NO_SESSION").as_deref(), Ok("1"));
         let (sender, _receiver) = std::sync::mpsc::channel();
         let started = std::time::Instant::now();
-        assert!(init(sender, "org.rufapp.desktop").is_err());
+        assert!(init(sender).is_err());
         assert_eq!(permission().unwrap(), NotificationPermission::Unsupported);
         assert!(started.elapsed() < Duration::from_secs(4));
     }

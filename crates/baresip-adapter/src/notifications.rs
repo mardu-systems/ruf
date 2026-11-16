@@ -42,6 +42,7 @@ pub enum NotificationPermission {
 /// development builds must pass false. Call once during desktop setup.
 /// Linux binds actions to the current freedesktop daemon's unique D-Bus owner;
 /// missing session/daemon services return `NativeFailure`. Restart after daemon replacement.
+/// Linux uses the installed `sip-desktop` desktop entry and icon instead of `app_id`.
 pub fn init_call_notifications(
     sender: Sender<CallNotificationAction>,
     app_id: &str,
@@ -57,8 +58,8 @@ pub fn init_call_notifications(
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = register_activation;
-        linux::init(sender, app_id)
+        let _ = (app_id, register_activation);
+        linux::init(sender)
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {

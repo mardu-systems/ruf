@@ -62,3 +62,8 @@ desktop service still checks the current call/token. Withdrawal removes the
 binding before closing the banner. Test banners contain no actions or call
 binding. OS method calls time out after three seconds. Restart Ruf after a
 notification-daemon restart; old daemon IDs cannot bind to a new daemon.
+
+Linux banners use `sip-desktop` as both the icon name and `desktop-entry` hint
+(without the `.desktop` suffix), matching the packaged icon and desktop alias.
+The bundle identifier remains `org.rufapp.desktop`; credential service names,
+IPC commands, request/response DTOs and action authorization are unchanged.

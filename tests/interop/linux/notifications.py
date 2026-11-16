@@ -15,6 +15,7 @@ class Notifications(dbus.service.Object):
         super().__init__(self.name, "/org/freedesktop/Notifications")
         self.counter = 0
         self.recorded = (0, "", [], False)
+        self.identity = ("", "")
         self.stalled = False
 
     @dbus.service.method(INTERFACE, out_signature="as")
@@ -28,6 +29,7 @@ class Notifications(dbus.service.Object):
         self.counter += 1
         identifier = replaces or self.counter
         self.recorded = (identifier, body, actions, bool(hints.get("suppress-sound")))
+        self.identity = (icon, str(hints.get("desktop-entry", "")))
         return identifier
 
     @dbus.service.method(INTERFACE, in_signature="u")
@@ -49,6 +51,10 @@ class Notifications(dbus.service.Object):
     @dbus.service.method(INTERFACE, out_signature="usasb")
     def Recorded(self):
         return self.recorded
+
+    @dbus.service.method(INTERFACE, out_signature="ss")
+    def Identity(self):
+        return self.identity
 
     @dbus.service.method(INTERFACE)
     def Stall(self):
