@@ -86,7 +86,7 @@ for (const damage of [
   "different-sidecar",
   "escaping-path",
   "symlink",
-  "newline-filename",
+  "newline-metadata",
 ] as const) {
   test(`release validation rejects ${damage} before publishing`, () => {
     const root = fixture();
@@ -129,8 +129,10 @@ for (const damage of [
           renameSync(installer, `${installer}.original`);
           symlinkSync(`${installer}.original`, installer);
         }
-        if (damage === "newline-filename")
-          renameSync(evidencePath, `${evidencePath}\n.build.json`);
+        if (damage === "newline-metadata") {
+          evidence.sbom.file = "unsafe\n.cdx.json";
+          writeFileSync(evidencePath, JSON.stringify(evidence));
+        }
         expect(() => collectReleaseArtifacts(root, "0.1.1")).toThrow();
       }
     } finally {
@@ -138,3 +140,24 @@ for (const damage of [
     }
   });
 }
+
+// Windows forbids control characters in physical filenames. The metadata case
+// above runs on every OS; Unix also exercises directory-entry validation.
+test.skipIf(process.platform === "win32")(
+  "release validation rejects a physical newline filename",
+  () => {
+    const root = fixture();
+    try {
+      const path = join(
+        root,
+        "desktop-aarch64-unknown-linux-gnu/deb/Ruf-aarch64-unknown-linux-gnu.build.json",
+      );
+      renameSync(path, `${path}\n.build.json`);
+      expect(() => collectReleaseArtifacts(root, "0.1.1")).toThrow(
+        "Invalid artifact filename",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

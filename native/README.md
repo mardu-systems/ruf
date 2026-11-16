@@ -274,6 +274,7 @@ The pinned OpenSSL recipe supports both native macOS CPU families. ARM64 keeps
 `native/build/openssl-macos14/install`; Intel uses
 `native/build/openssl-macos14-x86_64/install` with `darwin64-x86_64-cc`. Select
 the matching `OPENSSL_ROOT_DIR` before the native build. CMake verifies archive
-CPU/deployment metadata, and the SDK builder requires the matching Rust host
+CPU/deployment metadata using `lipo <archive> -verify_arch <cpu>` (the input must
+precede the architecture list for older Apple tools), and the SDK builder requires the matching Rust host
 triple. Source pins, patches and macOS 14 minimum are identical. SDKs and SBOMs
 remain separate; a universal Rust target cannot substitute for a native SDK.

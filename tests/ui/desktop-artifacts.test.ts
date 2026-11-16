@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { desktopInstallers } from "../../scripts/desktop-artifacts.ts";
 
 test("installer evidence includes fresh Linux packages and excludes stale outputs", () => {
@@ -29,14 +29,14 @@ test("installer evidence includes fresh Linux packages and excludes stale output
     utimesSync(join(root, "bundle/deb/old.deb"), 1, 1);
     expect(
       desktopInstallers(root, Date.now() - 10_000)
-        .map((path) => path.slice(root.length + 1))
+        .map((path) => relative(root, path))
         .sort(),
     ).toEqual([
-      "bundle/appimage/Ruf_aarch64.AppImage",
-      "bundle/deb/Ruf_amd64.deb",
-      "bundle/dmg/Ruf.dmg",
-      "bundle/nsis/Ruf-setup.exe",
-      "bundle/rpm/Ruf.x86_64.rpm",
+      join("bundle", "appimage", "Ruf_aarch64.AppImage"),
+      join("bundle", "deb", "Ruf_amd64.deb"),
+      join("bundle", "dmg", "Ruf.dmg"),
+      join("bundle", "nsis", "Ruf-setup.exe"),
+      join("bundle", "rpm", "Ruf.x86_64.rpm"),
     ]);
     expect(desktopInstallers(join(root, "absent"), 0)).toEqual([]);
   } finally {

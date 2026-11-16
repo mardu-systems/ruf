@@ -81,8 +81,10 @@ runs at most six test processes through `bun run test:native` in each selected
 desktop job. Each NAT test and named SIP timeout/deadline case runs with an exact
 filter in its own process; the longest blackout/hold cases start first. Ordinary
 SIP tests share a serial process, skipping the individually scheduled cases.
-Workspace/integration/doc tests remain in the remaining partition. All partitions
-must pass; ignored tests retain their ordinary Cargo behavior, all protocol timers
+Cargo JSON identifies all compiled test executables, which run directly without
+concurrent Cargo builds. Remaining workspace/integration executables are included;
+doc tests run through Cargo after every executable has exited. All partitions
+and doc tests must pass; ignored tests retain their ordinary Cargo behavior, all protocol timers
 and assertions stay unchanged, and Asterisk still runs its opt-in scenarios.
 
 Each process's stdout and stderr are streamed immediately with a `[native:…]`

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -157,6 +158,19 @@ macosTest(
 macosTest("OpenSSL probe rejects archives for another macOS CPU", () => {
   const directory = mkdtempSync(join(tmpdir(), "ruf-openssl-cpu-"));
   try {
+    // Apple's older lipo consumes every argument after -verify_arch as a CPU.
+    // Newer LLVM lipo also accepts the formerly used, incompatible file-last form.
+    const bin = join(directory, "bin");
+    mkdirSync(bin);
+    const lipo = join(bin, "lipo");
+    const realLipo = execFileSync("xcrun", ["--find", "lipo"], {
+      encoding: "utf8",
+    }).trim();
+    writeFileSync(
+      lipo,
+      `#!/bin/sh\ncase "$1" in -*) echo 'input must precede -verify_arch' >&2; exit 64;; esac\nexec "${realLipo}" "$@"\n`,
+    );
+    chmodSync(lipo, 0o755);
     const source = join(directory, "fixture.c");
     writeFileSync(source, "int fixture(void) { return 0; }\n");
     for (const cpu of ["arm64", "x86_64"]) {
@@ -197,7 +211,10 @@ macosTest("OpenSSL probe rejects archives for another macOS CPU", () => {
             `-DCMAKE_OSX_ARCHITECTURES=${requested}`,
             `-DOPENSSL_ROOT_DIR=${prefix}`,
           ],
-          { encoding: "utf8" },
+          {
+            encoding: "utf8",
+            env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+          },
         );
       expect(probe(cpu).status).toBe(0);
       const mismatch = probe(cpu === "arm64" ? "x86_64" : "arm64");
