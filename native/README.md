@@ -45,8 +45,9 @@ patch adds bounded PulseAudio startup and safe terminal-failure observation; see
 [patch contracts](patches/README.md#wasapi-worker-lifetime-and-output-status).
 See the [behavioral contract](../docs/api/sip-events.md#native-sdk-413).
 
-Supported native build hosts: macOS ARM64/Intel and Windows MSVC x64; Linux x64/ARM64 is available
-for headless interoperability tests and the experimental Linux desktop foundation.
+Native build hosts are macOS ARM64/Intel, Windows MSVC x64/ARM64 and Linux GNU
+x64/ARM64. Windows ARM64 and the Linux desktop remain experimental; headless
+Linux interoperability uses the same SDK.
 See [Linux desktop prerequisites and acceptance](../docs/linux.md). Cross compilation is not implemented.
 
 Desktop CI caches only `native/install/<target>/`, including the SDK's NAT test

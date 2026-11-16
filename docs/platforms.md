@@ -17,6 +17,17 @@ An additional experimental Windows ARM64 CI job uses `windows-11-arm` to build
 this matrix's release selection and does not establish Windows ARM64 hardware,
 audio or SIP acceptance.
 
+## Observed coverage
+
+The [16 November PR CI](verification/2026-11-16-ci-platform-fixes.md) passed native
+Linux x64, macOS ARM64 and Windows x64 builds/tests and their installers. Intel
+macOS and ARM64 Linux/Windows remain part of the full main/manual/release matrix;
+that PR run did not execute them. Linux ARM64 additionally has
+[Ubuntu/GNOME and Fedora/KDE VM acceptance](verification/2026-11-16-linux-audio-recovery.md).
+Physical device/provider qualification remains separate for every architecture.
+These development targets are not all present in the original
+[published 0.1.1 assets](releases/0.1.1.md).
+
 ## Linux distributions
 
 Linux binary builds use Ubuntu 22.04/glibc 2.35 as their compatibility baseline,

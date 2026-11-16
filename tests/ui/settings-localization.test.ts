@@ -101,7 +101,7 @@ test("unsupported microphone query can expose OS settings without changing other
   expect(microphone).toContain("Open System Settings");
 });
 
-test("both offline release-note bundles retain every release and change", async () => {
+test("both offline release-note bundles retain unreleased changes and every release", async () => {
   const { parseChangelog } =
     await import("../../apps/desktop/src/lib/changelog");
   const english = parseChangelog(
@@ -110,17 +110,19 @@ test("both offline release-note bundles retain every release and change", async 
   const german = parseChangelog(
     await Bun.file(new URL("../../CHANGELOG.de.md", import.meta.url)).text(),
   );
-  expect(german.map((entry) => entry.title.match(/^\S+/)?.[0])).toEqual(
-    english.map((entry) => entry.title.match(/^\S+/)?.[0]),
-  );
+  expect(german[0]?.title).toBe("Unveröffentlicht · Entwicklungsstand");
+  expect(english[0]?.title).toBe("Unreleased · Development");
+  expect(
+    german.slice(1).map((entry) => entry.title.match(/^\S+/)?.[0]),
+  ).toEqual(english.slice(1).map((entry) => entry.title.match(/^\S+/)?.[0]));
   expect(german.map((entry) => entry.changes.length)).toEqual(
     english.map((entry) => entry.changes.length),
   );
   const manifest: { version: string } = await Bun.file(
     new URL("../../package.json", import.meta.url),
   ).json();
-  expect(german[0]?.title).toBe(`${manifest.version} · Vorschau`);
-  expect(english[0]?.title).toBe(`${manifest.version} · Preview`);
+  expect(german[1]?.title).toBe(`${manifest.version} · Vorschau`);
+  expect(english[1]?.title).toBe(`${manifest.version} · Preview`);
   expect(
     german.find((entry) => entry.title === "0.1.0 · Vorschau")?.changes[0],
   ).toContain("Durchsuche Ruf");

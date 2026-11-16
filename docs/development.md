@@ -50,6 +50,8 @@ The SDK and desktop target must match; this does not cross-compile an x64 SDK.
 real native phone. See [native prerequisites](../native/README.md) and the
 [Asterisk lab](../tests/interop/asterisk/README.md). `bun run dev` starts Tauri and a loopback-only Vite server. `bun run dev:web` is
 for layout work only. Native API access is unavailable in that browser mode.
+The [unreleased notes](releases/unreleased.md) distinguish current source from
+the published 0.1.1 installers.
 
 Before a change is complete:
 
@@ -97,14 +99,17 @@ For native changes, also run workspace Clippy/tests with
 `bun run desktop:build --features native`. Test-tone mode needs no audio
 hardware; microphone/speaker and Windows runtime require separate platform tests.
 
-`bun run test:native` builds the native workspace tests once, then runs NAT,
-SIP-event and remaining workspace tests in three separate processes. The native
-engine stays a singleton within each process; the full test selection, integration
-tests, doc tests and opt-in policy remain unchanged. Each process retains its
-exit status and logs, and any failure fails the command. On a headless Linux
-host, `bun run test:native --adapter` selects only `baresip-adapter`, matching the
-interop job without requiring Tauri system libraries. The separate Asterisk
-command still runs the opt-in SIP/audio/security scenarios.
+`bun run test:native` compiles the selected native suite once and reads executable
+paths from Cargo JSON. It runs the compiled tests from their package directories,
+with at most six processes: individual NAT/timeout cases, a serial ordinary SIP
+group and the remaining workspace/integration executables. Cargo doc tests run
+after all executables exit. Failures retain streamed per-process logs and fail
+the command; no concurrent Cargo rebuild can replace a partition's binary.
+Ignored tests keep their existing opt-in policy. On a headless Linux host,
+`bun run test:native --adapter` selects only `baresip-adapter`, without Tauri
+system libraries. `bun run test:asterisk` separately runs the complete opt-in
+SIP/audio/security lab. See the [runner contract](api/tooling.md) and
+[current CI evidence](verification/2026-11-16-ci-platform-fixes.md).
 
 macOS bundles require both `NSMicrophoneUsageDescription` in `Info.plist` and
 the `com.apple.security.device.audio-input` hardened-runtime entitlement in
@@ -249,9 +254,10 @@ loop rechecks mutations for incoming-call races. Saves wait for application of
 the queued native configuration, then poll for registration success.
 
 `accounts.json` under the Tauri application-data directory stores nonsecret
-metadata and selected account. Passwords use macOS Keychain Services / Windows
-Credential Manager through keyring. No plaintext fallback or browser password
-storage exists. Obsolete credential deletion is journaled and retried after
+metadata and selected account, including optional per-account BLF targets.
+Passwords use macOS Keychain Services / Windows Credential Manager through
+keyring, or encrypted Linux Secret Service through the existing desktop store. No
+plaintext fallback or browser password storage exists. Obsolete credential deletion is journaled and retried after
 access failures. See the [API contract](api/README.md) for schema/error details.
 The actual engine-wide audio mode is returned in snapshots, so webview reloads
 and new windows do not infer it from local form defaults.

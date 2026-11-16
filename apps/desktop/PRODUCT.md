@@ -1,8 +1,10 @@
 # Ruf product scope
 
-Ruf is a compact SIP softphone built with Rust, Tauri 2 and Svelte. Release targets
-are macOS 14+ on Apple Silicon and Windows 11 x64. The current 0.1.0 preview is
-for isolated test networks; supported provider/platform profiles require observed
+Ruf is a compact SIP softphone built with Rust, Tauri 2 and Svelte. The published
+0.1.1 preview provides macOS Apple Silicon and Windows x64 installers. Development
+targets add macOS Intel, Linux GNU x64/ARM64 and experimental Windows ARM64; see
+the [platform matrix](../../docs/platforms.md) and
+[unreleased notes](../../docs/releases/unreleased.md). Builds are for isolated test networks; supported provider/platform profiles require observed
 qualification. See the [README](../../README.md), [release checklist](../../docs/release-checklist.md)
 and [verification evidence](../../docs/verification/README.md).
 
@@ -11,6 +13,8 @@ and [verification evidence](../../docs/verification/README.md).
 - Up to eight independently registered SIP accounts, with explicit outgoing
   identity, activation and OS credential storage. Fresh account fields are empty;
   the user's test PBX is the primary setup path and Asterisk is an optional lab.
+- Native account-scoped BLF for up to 32 extensions per account, with unknown,
+  idle, ringing and busy states when the PBX supports dialog subscriptions.
 - One call plus one related consultation, with one audible conversation. Native
   mute, local/remote hold, DTMF and transfer results follow observed state.
 - UDP/TCP/TLS and required SDES-SRTP with TLS. Configured policy is distinct from
@@ -18,11 +22,12 @@ and [verification evidence](../../docs/verification/README.md).
   claim of end-to-end encryption.
 - Authorized macOS contacts, local favorites and SQLite call history. Contact
   names are current in-memory projections; history retention and collection are
-  explicit preferences. Windows contacts are not implemented.
+  explicit preferences. Windows and Linux system contacts are not implemented.
 - Separate phone/settings windows, background ringing, tray controls, action/
   contact/history search and accessible keyboard/menu actions. Closing the phone
   hides it; explicit Quit completes the native shutdown path.
-- Native audio routing/tests, explicit OS permission actions, anonymous diagnostics
+- Native CoreAudio/WASAPI/PulseAudio routing and bounded audio tests, explicit
+  supported OS permission actions, anonymous diagnostics
   and notification privacy. Automatic updates and calendar integration are absent.
 
 Exact command, DTO, validation and error semantics live in the

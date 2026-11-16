@@ -1,4 +1,4 @@
-# Linux desktop foundation
+# Linux desktop setup and acceptance
 
 Ruf has an experimental native Linux desktop target. The initial distribution
 baseline is Ubuntu 22.04/glibc 2.35, with DEB, RPM and AppImage artifacts for
@@ -119,17 +119,34 @@ The Linux audio patch waits up to three seconds for native connection/stream
 acceptance. Streams retain the connection that owns their callbacks. Terminal
 server/stream failures are observed on the SIP event loop, which ends active
 tests/calls and reports a native failure instead of claiming capture continues.
-Restart Ruf after a terminal audio-server failure. Capture workers never destroy
-or join themselves, and teardown does not wait indefinitely to flush playback.
+After a device/server failure, failed audio owners must be released before
+the SIP loop acknowledges recovery from a ready backend. Subsequent tests/calls
+can then start without restarting Ruf; the existing reconnect timer remains
+bounded. Capture workers never destroy or join themselves, and teardown does not
+wait indefinitely to flush playback.
 
 Existing portable/native Rust tests, Clippy, frontend/UI checks and generated DTO
 verification remain required. The Linux desktop workflow builds the SDK before
 native checks and preserves separate Asterisk interoperability coverage. Build
 hash manifests and compiled SBOMs accompany all three installer formats.
 
-Observed Ubuntu/GNOME and Fedora/KDE ARM64 VM results, package hashes and the
-remaining hardware/keyring checks are recorded in the
-[desktop verification report](verification/2026-11-16-linux-desktop.md).
+## Observed results
+
+Ubuntu 22.04.5/GNOME and Fedora 44/KDE ARM64 UTM sessions passed real keyring
+persistence, hidden-window incoming calls/actions, tray behavior, all three
+login/autostart modes and package removal/reinstallation. Real Mac microphone
+signal and user-confirmed speech echo passed through both guests. Virtual
+endpoint removal/recreation, fixed routing and audio-server recovery also passed.
+Fedora ran Ubuntu-built ARM64 native executables against its actual services.
+
+The [desktop acceptance](verification/2026-11-16-linux-acceptance.md),
+[audio recovery record](verification/2026-11-16-linux-audio-recovery.md) and
+[full lab run](verification/2026-11-16-linux-lab.md) retain source/package bindings
+and limitations. The newer [CI #57 verification](verification/2026-11-16-ci-platform-fixes.md)
+passed Linux x64 native/service tests, all three packages and isolated startup.
+Physical headset unplug/replug and route verification remain open in
+[#17](https://github.com/mardu-systems/ruf/issues/17); VM and virtual-device
+results do not qualify that physical-device criterion.
 
 ## Manual release acceptance
 

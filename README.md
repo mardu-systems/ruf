@@ -4,11 +4,11 @@
 
 # Ruf
 
-**A compact SIP softphone for macOS and Windows.**
+**A compact SIP softphone for macOS, Windows and Linux.**
 
 [![CI](https://github.com/mardu-systems/ruf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mardu-systems/ruf/actions/workflows/ci.yml)
 [![Version: 0.1.1 Developer Preview](https://img.shields.io/badge/Version-0.1.1%20Developer%20Preview-1d4ed8)](docs/releases/0.1.1.md)
-[![Target platforms: macOS and Windows](https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows-64748b)](docs/development.md)
+[![Target platforms: macOS, Windows and Linux](https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows%20%7C%20Linux-64748b)](docs/platforms.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-15803d)](LICENSE)
 
 [Get the preview](docs/testing-preview.md#get-the-preview) · [Watch the UI demo](#ui-demo) · [Report a bug](https://github.com/mardu-systems/ruf/issues/new?template=bug_report.yml) · [Help test compatibility](docs/testing-preview.md#help-test-compatibility)
@@ -20,6 +20,11 @@ manage multiple accounts, and keep contacts and recent calls in a clear interfac
 Mute, hold, the DTMF keypad and transfer controls stay within reach during a call.
 
 This is a Developer Preview for isolated test networks, not production use.
+The published [0.1.1 preview](https://github.com/mardu-systems/ruf/releases/tag/v0.1.1)
+contains macOS Apple Silicon and Windows x64 installers. The current development
+source adds Linux, Intel macOS, experimental Windows ARM64 and the changes below;
+those additions are not included in the published 0.1.1 installers.
+See [unreleased changes](docs/releases/unreleased.md) and the [tester guide](docs/testing-preview.md).
 
 ## UI demo
 
@@ -51,21 +56,23 @@ the captures show English. [Media provenance and regeneration](docs/screenshots/
 
 </details>
 
-The screenshots show the current English interface with fictional demo accounts
-and contacts. They do not establish real calling or operating-system acceptance.
+The screenshots illustrate the English preview interface with fictional demo
+accounts and contacts; newer development changes are described below. They do
+not establish real calling or operating-system acceptance.
 
 ## Features
 
-| Area                  | What Ruf offers                                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Multiple accounts** | Up to eight saved SIP accounts, independently enabled, with a selectable outgoing identity.                         |
-| **Calls**             | Answer, reject, hang up, mute, hold and send native DTMF tones for digits, star and hash.                           |
-| **Transfers**         | Transfer directly or start a consultation, switch between calls and complete the attended transfer.                 |
-| **macOS contacts**    | Search after explicit permission, use favorites and identify matching contacts while dialing or on a call.          |
-| **Local history**     | Call outcomes and duration, callbacks through the original account, and configurable history storage and retention. |
-| **Audio**             | Select microphone, call speaker and ringtone outputs separately, and check them with short audio tests.             |
-| **Desktop**           | Tray menu, background operation, keyboard shortcuts and search with ⌘K or Ctrl+K; incoming notifications on macOS.  |
-| **Languages**         | German and English across the phone, settings and native presentation; follows the system or your saved selection.  |
+| Area                  | What Ruf offers                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Multiple accounts** | Up to eight saved SIP accounts, independently enabled, with a selectable outgoing identity.                                                       |
+| **Extension status**  | Monitor up to 32 extensions per account through SIP BLF: unknown, idle, ringing or busy, when supported by the PBX.                               |
+| **Calls**             | Answer, reject, hang up, mute, hold and send native DTMF tones for digits, star and hash.                                                         |
+| **Transfers**         | Transfer directly or start a consultation, switch between calls and complete the attended transfer.                                               |
+| **macOS contacts**    | Search after explicit permission, use favorites and identify matching contacts while dialing or on a call.                                        |
+| **Local history**     | Call outcomes and duration, callbacks through the original account, and configurable history storage and retention.                               |
+| **Audio**             | Select microphone, call speaker and ringtone outputs separately, and check them with short audio tests.                                           |
+| **Desktop**           | Tray menu, background operation, keyboard shortcuts and search with ⌘K or Ctrl+K; native incoming-call notifications on macOS, Windows and Linux. |
+| **Languages**         | German and English across the phone, settings and native presentation; follows the system or your saved selection.                                |
 
 Rust and Tauri 2 power the desktop application, with Svelte for the interface.
 SIP and audio run natively through baresip. Original project code uses the
@@ -73,13 +80,12 @@ SIP and audio run natively through baresip. Original project code uses the
 
 ## Status and limitations
 
-- Target platforms are **macOS 14+ on Apple Silicon** and **Windows 11 x64**.
-  A successful build does not replace testing on physical audio hardware or
-  against your own telephone system. See the
-  [verification records](docs/verification/README.md) for results and boundaries.
-- An **experimental Linux desktop foundation** adds Ubuntu 22.04-baseline DEB/RPM/AppImage
-  builds for x64/ARM64, alongside Intel/Apple Silicon macOS builds. See [platform coverage](docs/platforms.md) and [Linux setup and remaining acceptance](docs/linux.md); it does not
-  establish hardware, Wayland or provider qualification.
+- Development targets are **macOS 14+ ARM64/Intel**, **Windows 11 x64/ARM64**
+  and **Linux GNU x64/ARM64**. Windows ARM64 is an experimental CI artifact;
+  Linux provides DEB, RPM and AppImage packages. See the
+  [platform matrix](docs/platforms.md) and [Linux setup](docs/linux.md).
+  The [verification records](docs/verification/README.md) distinguish hosted
+  builds, Ubuntu/Fedora VM acceptance and remaining physical-device tests.
 - Default direct-distribution builds use ad hoc signing on macOS; Windows
   installers are unsigned. Local Developer ID signing is separately documented,
   but it does not establish notarization or the identity of a future hosted
@@ -91,8 +97,12 @@ SIP and audio run natively through baresip. Original project code uses the
   security indicators follow actual native observations. Protection to the
   telephone system is not end-to-end encryption.
 - At most two related dialogs share one audible conversation. Passwords are
-  stored in macOS Keychain or Windows Credential Manager.
-- Windows contacts, calendar integration and automatic updates are not yet available.
+  stored in macOS Keychain, Windows Credential Manager or an encrypted Linux
+  Secret Service provider such as GNOME Keyring or configured KDE Wallet.
+- System contacts are currently macOS-only. Calendar integration and automatic
+  updates are not available. Linux needs a graphical session, a Secret Service
+  provider, desktop notifications and PulseAudio or pipewire-pulse; see the
+  [Linux acceptance boundaries](docs/linux.md#manual-release-acceptance).
 
 Ruf remains free and open source on GitHub, with no in-app purchases.
 An optional paid Mac App Store release is planned.
@@ -101,7 +111,8 @@ An optional paid Mac App Store release is planned.
 
 Use the Bun and Rust versions pinned in `.bun-version` and `rust-toolchain.toml`,
 and install the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
-The native SDK requires CMake and OpenSSL; see the
+The native SDK requires CMake and OpenSSL. On macOS, select an OpenSSL build
+compatible with the macOS 14 deployment target before building; see the
 [native build guide](native/README.md) for platform-specific setup.
 
 ```sh
@@ -130,22 +141,25 @@ workspace dependencies. See the [cleanup contract](docs/api/tooling.md#cleanup).
 | `crates/phone-core`      | Platform-independent Rust contracts and validation |
 | `crates/baresip-adapter` | Native SIP and audio integration                   |
 | `native`                 | Pinned SDK builds and license texts                |
-| `tests/interop`          | Asterisk integration tests                         |
+| `tests/interop`          | SIP/RTP labs and Linux desktop checks              |
 | `.github`                | CI, installers and draft releases                  |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md), [development](docs/development.md) and
   [API contracts](docs/api/README.md)
+- [Unreleased changes](docs/releases/unreleased.md), [English changelog](CHANGELOG.md)
+  and [German changelog](CHANGELOG.de.md)
 - [CI/CD and signing](docs/ci-cd.md), [release checklist](docs/release-checklist.md)
   and [verification records](docs/verification/README.md)
 - [License](LICENSE), [dependency attribution](docs/licensing.md) and
-  [privacy policy draft](docs/privacy-policy-ruf.en.md)
+  [macOS privacy policy draft](docs/privacy-policy-ruf.en.md)
 - [Code of conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md)
 
 ## Contributing
 
-Windows headset tests, FreeSWITCH interoperability reports and first-run Mac
-feedback are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+Linux and Windows physical headset tests, Intel/ARM64 platform reports,
+FreeSWITCH interoperability and first-run feedback are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
 [compatibility guide](docs/testing-preview.md#help-test-compatibility).
 Keep credentials and personal account, contact and call data out of reports.

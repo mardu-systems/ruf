@@ -1,5 +1,19 @@
 # What's new in Ruf?
 
+## Unreleased · Development
+
+- Build the native Linux desktop on GNU x64 or ARM64, with DEB, RPM and AppImage packages. The published 0.1.1 installers do not include these development changes.
+- Use Linux Secret Service for encrypted account passwords, desktop notifications with answer/reject actions, tray/background operation and installed-app autostart.
+- Keep Linux microphone, conversation and ringtone outputs separate through PulseAudio or pipewire-pulse. Fixed routes stay on the selected device; new tests and calls recover after failed owners are released and the device or audio server returns.
+- Monitor up to 32 extensions per account using native SIP BLF. Show unknown, idle, ringing and busy states; the PBX must support dialog subscriptions and authorize them.
+- Run native macOS builds on both Apple Silicon and Intel with the macOS 14 minimum. Add an experimental native Windows ARM64 build target, excluded from release-draft assets.
+- Improve Windows native audio startup errors, communications-default routing and recovery after device invalidation. Add account-free microphone and speaker diagnostics.
+- Use a more compact phone layout, simpler first-run setup and stronger window, keyboard and call-control recovery.
+- Update the native baresip/libre engine to 4.13.0 and improve call-state synchronization and shutdown handling.
+- Simplify the macOS drag-to-Applications DMG background while retaining its Retina artwork.
+- Keep PR checks to Linux x64, macOS ARM64 and Windows x64, with all six native targets for main, manual runs and releases. Keep package, native calling and security checks enabled across the selected platforms.
+- Confirm real microphone signal and audible speech echo through Ubuntu/GNOME and Fedora/KDE ARM64 VMs. Physical Linux headset removal/reconnection and Windows hardware acceptance remain open.
+
 ## 0.1.1 · Preview
 
 - Free Developer Preview with German and English phone/settings UI, native menus and app-owned notifications. No in-app purchases.

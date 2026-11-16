@@ -229,8 +229,10 @@ loads with compatibility defaults and is backed up before the first replacement;
 see [preference migration](preferences.md). It contains **no passwords**. Same-directory
 file replacement commits metadata. Unsupported/corrupt data is rejected rather
 than overwritten. macOS Keychain Services and Windows Credential Manager are used
-through keyring; other operating systems have no desktop secret-store backend in
-this milestone.
+through keyring. Linux uses the existing desktop store with an encrypted
+Secret Service session on the user bus. Locked/background and foreground-unlock
+behavior is documented in [Linux credential recovery](credential-recovery.md#linux-secret-service);
+there is no plaintext fallback.
 
 Persisted account names, registrar/username syntax, duplicate identities and
 credential keys are validated before engine initialization or credential access.

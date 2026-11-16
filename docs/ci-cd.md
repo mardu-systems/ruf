@@ -39,6 +39,12 @@ target-selection job uses `scripts/desktop-matrix.ts`, without installing Rust o
 frontend dependencies. Package formats, runners and cache paths have one shared
 definition for both scopes.
 
+Observed [PR CI #57](https://github.com/mardu-systems/ruf/actions/runs/43870420990)
+passed all seven jobs at `cf5102f` in 13:48, including SDK rebuilds. The
+[verification record](verification/2026-11-16-ci-platform-fixes.md) gives per-job
+timings, corrections and scope. It is a three-target result, not a warm-cache
+benchmark or full six-target qualification.
+
 Formatting, generated contracts and frontend type checks run once in Portable
 checks. UI unit tests run there and once on macOS ARM64/Windows x64 to retain
 OS-sensitive tooling coverage. Each native build retains workspace Clippy/tests,
