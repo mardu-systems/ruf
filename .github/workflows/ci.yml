@@ -20,3 +20,5 @@ jobs:
   desktop:
     name: Desktop
     uses: ./.github/workflows/desktop-build.yml
+    with:
+      full-matrix: ${{ github.event_name != 'pull_request' }}

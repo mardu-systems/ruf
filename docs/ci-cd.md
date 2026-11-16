@@ -31,6 +31,23 @@ Setup does not push, tag or publish a release.
   installers and the checksum file into the same directory. Matching per-target
   SBOM and build-hash manifests are also attached. Checksums do not authenticate a publisher.
 
+Pull requests build three native desktop targets: Linux x64, macOS ARM64 and
+Windows x64. Pushes to the main/foundation branch, manual CI runs and releases
+retain all six CPU/OS combinations. The reusable desktop workflow defaults its
+`full-matrix` input to true; the PR caller explicitly selects false. A lightweight
+target-selection job uses `scripts/desktop-matrix.ts`, without installing Rust or
+frontend dependencies. Package formats, runners and cache paths have one shared
+definition for both scopes.
+
+Formatting, generated contracts and frontend type checks run once in Portable
+checks. UI unit tests run there and once on macOS ARM64/Windows x64 to retain
+OS-sensitive tooling coverage. Each native build retains workspace Clippy/tests,
+network/media regressions, OS-service checks, installer generation and applicable
+bundle/startup/permission checks. Tauri's existing `beforeBuildCommand` supplies
+the target-specific frontend build; no separate duplicate build precedes it.
+The Asterisk job keeps the complete SIP/RTP/TLS/SRTP lab and diagnostics, while
+the desktop jobs own the native unit suite and network-roam checks.
+
 macOS builds request both `app,dmg`: Tauri retains Ruf.app so the signature and
 permission checks run against the finished bundle before uploading the DMG.
 DMG-only packaging removes its temporary app and cannot support those checks.
@@ -39,9 +56,11 @@ Desktop jobs allow 60 minutes: the first complete cold Windows run took almost
 This is a cold-build budget. The installed native SDK is cached separately with
 an exact compiler/image/input key and saved immediately after qualification.
 Cache hits reuse the existing manifest/archive checks and rerun its two NAT
-regressions; application compilation and tests remain unconditional. Rust
-dependency caches are also saved after failed non-PR runs so a later test failure
-does not force the same dependency compilation again.
+regressions; application compilation and tests remain unconditional. CI workflow
+edits alone do not invalidate the SDK: keys still cover its actual recipes,
+sources, patches, target and compiler/image identity. Rust dependency caches are
+also saved after failed trusted runs and same-repository PR runs so a later test
+failure does not force the same dependency compilation again.
 
 When the SDK misses, OpenSSL has its own exact cache: the macOS static install is
 keyed by `native/build-openssl-macos.sh`, Windows' vcpkg install by
@@ -50,13 +69,16 @@ without SIP pins, patches or application sources. No fallback keys are used.
 The macOS recipe retains its checksum, minimum OS, static flags and full OpenSSL
 tests; Windows still runs its pinned vcpkg manifest installation. Existing SDK
 discovery validates headers, archives and macOS object deployment metadata before
-use. OpenSSL is saved after SDK qualification, before app checks, only on non-PR
-runs. A complete SDK hit skips this OpenSSL restore/build path. The first run
-must populate the independent cache; PRs do not publish trusted shared caches.
+use. OpenSSL is saved after SDK qualification, before app checks. A complete SDK
+hit skips this OpenSSL restore/build path. Cache writes are allowed on non-PR
+runs and same-repository PRs; fork PRs remain restore-only. GitHub scopes PR
+caches to that PR's merge ref, so the base branch and other PRs cannot restore
+them. PRs therefore do not publish trusted branch caches. See
+[GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
 
 Native test execution builds once, discovers the compiled native unit tests and
-runs at most six test processes through `bun run test:native`. Linux uses
-`--adapter`. Each NAT test and named SIP timeout/deadline case runs with an exact
+runs at most six test processes through `bun run test:native` in each selected
+desktop job. Each NAT test and named SIP timeout/deadline case runs with an exact
 filter in its own process; the longest blackout/hold cases start first. Ordinary
 SIP tests share a serial process, skipping the individually scheduled cases.
 Workspace/integration/doc tests remain in the remaining partition. All partitions

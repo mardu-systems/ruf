@@ -60,6 +60,18 @@ with `localization` selecting only the language-switch/changelog-race flow.
 An unsupported `SIP_UI_LANGUAGE` fails the command. These are test-runner
 controls, not application preference or language overrides.
 
+## Desktop CI matrix
+
+`bun scripts/desktop-matrix.ts pr|full` is the CI target selector. Exactly one
+scope is required; `GITHUB_OUTPUT` must name the runner's output file. `pr`
+selects Linux x64, macOS ARM64 and Windows x64; `full` retains all six native
+targets, including experimental Windows ARM64. Success appends one
+`matrix={"include":[...]}` JSON line containing runner, target, bundle formats,
+artifact globs and OpenSSL cache/recipe metadata. Unsupported/missing scope,
+extra arguments, missing output path or filesystem failures exit nonzero.
+The reusable desktop workflow defaults to the full scope; its PR caller selects
+the reduced scope. The selector does not build or publish artifacts.
+
 ## Native network and media regressions
 
 `bun run test:network-roam` requires the pinned Rust toolchain, a C compiler,

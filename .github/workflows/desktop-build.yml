@@ -1,79 +1,40 @@
 name: Desktop build
 on:
   workflow_call:
+    inputs:
+      full-matrix:
+        description: Build both CPUs per OS; PR callers select one native target per OS.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 jobs:
+  targets:
+    name: Select desktop targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - id: matrix
+        run: bun scripts/desktop-matrix.ts ${{ inputs.full-matrix && 'full' || 'pr' }}
+
   build:
     name: ${{ matrix.target }}
+    needs: targets
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            bundle: dmg
-            bundles: app,dmg
-            artifact: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            openssl-cache-path: native/build/openssl-macos14/install
-            openssl-prefix: native/build/openssl-macos14/install
-            openssl-recipe: native/build-openssl-macos.sh
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            bundle: dmg
-            bundles: app,dmg
-            artifact: target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-            openssl-cache-path: native/build/openssl-macos14-x86_64/install
-            openssl-prefix: native/build/openssl-macos14-x86_64/install
-            openssl-recipe: native/build-openssl-macos.sh
-          - runner: windows-2022
-            target: x86_64-pc-windows-msvc
-            bundle: nsis
-            bundles: nsis
-            artifact: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            openssl-cache-path: native/build/x86_64-pc-windows-msvc/vcpkg
-            openssl-recipe: native/vcpkg.*
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            bundle: nsis
-            bundles: nsis
-            artifact: target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
-            openssl-cache-path: native/build/aarch64-pc-windows-msvc/vcpkg
-            openssl-recipe: native/vcpkg.*
-          - runner: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            bundle: deb
-            bundles: deb,rpm,appimage
-            artifact: |
-              target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
-              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
-              target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
-            extra-evidence: |
-              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.cdx.json
-              target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.build.json
-              target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.cdx.json
-              target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.build.json
-            openssl-cache-path: native/build/unused-linux-openssl
-            openssl-recipe: native/openssl-probe/**
-          - runner: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            bundle: deb
-            bundles: deb,rpm,appimage
-            artifact: |
-              target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
-              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.rpm
-              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
-            extra-evidence: |
-              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.cdx.json
-              target/aarch64-unknown-linux-gnu/release/bundle/rpm/*.build.json
-              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.cdx.json
-              target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.build.json
-            openssl-cache-path: native/build/unused-linux-openssl
-            openssl-recipe: native/openssl-probe/**
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
     env:
       CI: true
       # Preserve the Finder background and drag-to-Applications icon layout.
@@ -105,7 +66,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: native/install/${{ matrix.target }}
-          key: native-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.native-toolchain.outputs.fingerprint }}-${{ hashFiles('native/*.ts', 'native/*.sh', 'native/sources.json', 'native/vcpkg.json', 'native/patches/**', 'native/openssl-probe/**', 'scripts/check-native-sdk.ts', '.github/workflows/desktop-build.yml', '.bun-version', 'rust-toolchain.toml') }}
+          key: native-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ steps.native-toolchain.outputs.fingerprint }}-${{ hashFiles('native/*.ts', 'native/*.sh', 'native/sources.json', 'native/vcpkg.json', 'native/patches/**', 'native/openssl-probe/**', 'scripts/check-native-sdk.ts', '.bun-version', 'rust-toolchain.toml') }}
       - name: Validate the restored SDK and rerun its NAT regressions
         if: steps.native-sdk.outputs.cache-hit == 'true'
         run: bun scripts/check-native-sdk.ts ${{ matrix.target }}
@@ -128,18 +89,17 @@ jobs:
         if: steps.native-sdk.outputs.cache-hit != 'true'
         run: bun run native:build
       - name: Save the qualified native SDK before app checks
-        if: steps.native-sdk.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        if: steps.native-sdk.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: native/install/${{ matrix.target }}
           key: ${{ steps.native-sdk.outputs.cache-primary-key }}
       - name: Save qualified OpenSSL independently of the SIP SDK
-        if: runner.os != 'Linux' && steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        if: runner.os != 'Linux' && steps.native-sdk.outputs.cache-hit != 'true' && steps.openssl.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ matrix.openssl-cache-path }}
           key: ${{ steps.openssl.outputs.cache-primary-key }}
-      - run: bun run check:versions
       - run: bun run test:network-roam
       - name: Verify macOS service timeout recovery
         if: runner.os == 'macOS'
@@ -147,13 +107,9 @@ jobs:
           bun run test:macos-contact-timeouts
           bun run test:macos-notification-timeouts
           bun run test:macos-login-item
-      - run: bun run types:generate
-      - name: Verify generated contracts are current
-        run: git diff --exit-code -- apps/desktop/src/lib/generated
-      - run: bun run format:check
+      # Linux runs these centrally; retain OS-sensitive tooling coverage once per other OS.
       - run: bun run test:ui
-      - run: bun run check
-      - run: bun run build
+        if: matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-pc-windows-msvc'
       - run: cargo clippy --locked --workspace --all-targets --features sip-desktop/native -- -D warnings
       - run: bun run test:native
         env:
@@ -212,9 +168,7 @@ jobs:
       - name: Install native build prerequisites
         run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev libpulse-dev pkg-config
       - run: bun run native:build
-      - run: bun run test:native --adapter
       - run: bun run test:asterisk
-      - run: bun run test:network-roam
       - run: bun run test:sip-diagnostics
       - name: Lab diagnostics
         if: failure()

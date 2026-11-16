@@ -69,7 +69,9 @@ static install uses the checksum-pinned `build-openssl-macos.sh` recipe, and
 Windows retains its pinned vcpkg installed tree. Their exact target/compiler keys
 do not depend on baresip/libre pins or local SIP patches. SDK discovery still
 validates the resulting headers/static libraries and macOS minimum. Both cache
-layers are saved only from non-PR runs after SDK qualification; see
+layers are saved after SDK qualification on non-PR and same-repository PR runs.
+Fork PRs remain restore-only; GitHub isolates each PR's writes from protected
+branch caches. See
 [CI cache behavior](../docs/ci-cd.md).
 
 ## Prerequisites
