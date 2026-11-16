@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -17,26 +23,29 @@ async function fixture(
   fail: boolean,
   writeFailure = false,
   inventory: readonly string[] = names,
+  docFailure = false,
 ) {
   const root = mkdtempSync(join(tmpdir(), "ruf-native-runner-"));
   const events = join(root, "events.jsonl");
   const cargo = join(root, "cargo.ts");
   const wrapper = join(root, "wrapper.ts");
+  const libtest = join(root, "libtest.ts");
+  const executable = join(
+    root,
+    process.platform === "win32" ? "libtest.exe" : "libtest",
+  );
   writeFileSync(
-    cargo,
-    `import { appendFileSync } from "node:fs";
+    libtest,
+    `import { appendFileSync, realpathSync } from "node:fs";
+if (realpathSync(process.cwd()) !== realpathSync(${JSON.stringify(root)})) throw new Error("libtest must run from its package directory, like Cargo");
 const args = process.argv.slice(2);
-const names = ${JSON.stringify(inventory)};
+const names = process.execPath.includes("integration") ? ["integration::workspace"] : ${JSON.stringify(inventory)};
 const events = ${JSON.stringify(events)};
 const event = (kind, name) => appendFileSync(events, JSON.stringify({kind, name, pid: process.pid}) + "\\n");
-if (args.includes("--no-run")) { event("build", "once"); process.exit(0); }
 if (args.includes("--list")) { console.log(names.map(n => n + ": test").join("\\n")); process.exit(0); }
-const separator = args.indexOf("--");
-const before = args.slice(0, separator);
-const after = args.slice(separator + 1);
-const filter = before.at(-1) === "--lib" || !before.includes("--lib") ? "" : before.at(-1);
-const skips = after.flatMap((arg, i) => arg === "--skip" ? [after[i + 1]] : []);
-const selected = names.filter(n => (after.includes("--exact") ? n === filter : n.includes(filter)) && !skips.some(s => n.includes(s)));
+const filter = args[0]?.startsWith("--") ? "" : args[0] ?? "";
+const skips = args.flatMap((arg, i) => arg === "--skip" ? [args[i + 1]] : []);
+const selected = names.filter(n => (args.includes("--exact") ? n === filter : n.includes(filter)) && !skips.some(s => n.includes(s)));
 event("start", filter);
 process.stdout.write("live-before-exit");
 process.stderr.write("stderr-before-exit");
@@ -45,6 +54,34 @@ for (const name of selected) event("test", name);
 event("end", filter);
 console.log("finished");
 if (${fail} && selected.includes("nat_tests::case_2")) process.exit(7);
+`,
+  );
+  // Native executables work without shebang support on Windows as well.
+  const compiled = await Bun.build({
+    entrypoints: [libtest],
+    compile: { outfile: executable },
+  });
+  if (!compiled.success) throw new Error(String(compiled.logs));
+  const integration = join(
+    root,
+    process.platform === "win32" ? "integration.exe" : "integration",
+  );
+  copyFileSync(executable, integration);
+  writeFileSync(
+    cargo,
+    `import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const event = (kind, name) => appendFileSync(${JSON.stringify(events)}, JSON.stringify({kind, name, pid: process.pid}) + "\\n");
+if (args.includes("--no-run") && args.includes("--message-format=json-render-diagnostics")) {
+  event("build", "once");
+  console.log(JSON.stringify({reason: "compiler-artifact", profile: {test: true}, target: {name: "baresip_adapter", kind: ["lib"]}, manifest_path: ${JSON.stringify(join(root, "Cargo.toml"))}, executable: ${JSON.stringify(executable)}}));
+  console.log(JSON.stringify({reason: "compiler-artifact", profile: {test: true}, target: {name: "integration", kind: ["test"]}, manifest_path: ${JSON.stringify(join(root, "Cargo.toml"))}, executable: ${JSON.stringify(integration)}}));
+  // Cargo also emits dependency artifacts; they must not run as tests.
+  console.log(JSON.stringify({reason: "compiler-artifact", profile: {test: false}, target: {name: "dependency", kind: ["lib"]}, executable: ${JSON.stringify(executable)}}));
+  process.exit(0);
+}
+if (args.includes("--doc")) { event("doc", "once"); process.exit(${docFailure ? 9 : 0}); }
+throw new Error("Cargo must only compile once, then run doc tests after all executables exit");
 `,
   );
   writeFileSync(
@@ -101,12 +138,14 @@ test("native runner executes every discovered test once with bounded parallelism
       .split("\n")
       .map((line) => JSON.parse(line) as { kind: string; name: string });
     expect(records.filter((x) => x.kind === "build")).toHaveLength(1);
+    expect(records.filter((x) => x.kind === "doc")).toHaveLength(1);
+    expect(records.at(-1)?.kind).toBe("doc");
     expect(
       records
         .filter((x) => x.kind === "test")
         .map((x) => x.name)
         .sort(),
-    ).toEqual([...names].sort());
+    ).toEqual([...names, "integration::workspace"].sort());
     let running = 0,
       maximum = 0;
     for (const record of records) {
@@ -186,7 +225,7 @@ test("native runner waits for all groups and retains logs after one failure", as
         .filter((x) => x.kind === "test")
         .map((x) => x.name)
         .sort(),
-    ).toEqual([...names].sort());
+    ).toEqual([...names, "integration::workspace"].sort());
     expect(readFileSync(join(logs!, "nat-3.log"), "utf8")).toContain(
       "live-before-exit",
     );
@@ -209,6 +248,26 @@ test("native runner rejects discovery without native modules", async () => {
     expect(output).not.toContain("NATIVE_CHECKS_OK");
     expect(readFileSync(events, "utf8")).not.toContain('"start"');
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native runner fails when doc tests fail after successful executable tests", async () => {
+  const { root, child } = await fixture(false, false, names, true);
+  let logs: string | undefined;
+  try {
+    const [output, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    logs = /Native checks failed; logs: (.+)/.exec(stderr)?.[1]?.trim();
+    expect(code).toBe(1);
+    expect(output).toContain("[native:doc] FAIL");
+    expect(output).not.toContain("NATIVE_CHECKS_OK");
+    expect(logs).toBeDefined();
+  } finally {
+    if (logs) rmSync(logs, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

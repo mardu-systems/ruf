@@ -9,16 +9,31 @@ const pins: typeof import("./sources.json") = await Bun.file(
 ).json();
 const targets: Record<string, string> = {
   "darwin-arm64": "aarch64-apple-darwin",
+  "darwin-x64": "x86_64-apple-darwin",
   "win32-x64": "x86_64-pc-windows-msvc",
+  "win32-arm64": "aarch64-pc-windows-msvc",
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
 };
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target)
   throw new Error(
-    "Unsupported native build host; use macOS arm64, Windows x64 or Linux x64/arm64.",
+    "Unsupported native build host. macOS/Linux require x64 or arm64; Windows requires a supported MSVC host.",
   );
 const windows = process.platform === "win32";
+if (!windows) {
+  const host = execFileSync("rustc", ["-vV"], { encoding: "utf8" }).match(
+    /^host: (.+)$/m,
+  )?.[1];
+  if (host !== target)
+    throw new Error(
+      `Native SDK requires matching Rust host ${target}; got ${host ?? "unknown"}. Cross compilation and musl SDKs are not configured.`,
+    );
+}
+if (process.platform === "linux")
+  execFileSync("pkg-config", ["--exists", "libpulse"], { stdio: "inherit" });
+const windowsArchitecture = process.arch === "arm64" ? "ARM64" : "x64";
+const windowsTriplet = `${process.arch === "arm64" ? "arm64" : "x64"}-windows-static-md`;
 const build = join(root, "native/build", target);
 const prefix = join(root, "native/install", target);
 const sources = join(root, "native/build/sources");
@@ -48,6 +63,9 @@ const baresipReliabilityPatch = await Bun.file(
 ).text();
 const baresipWasapiPatch = await Bun.file(
   join(root, "native/patches/baresip-wasapi.patch"),
+).text();
+const baresipPulsePatch = await Bun.file(
+  join(root, "native/patches/baresip-pulse.patch"),
 ).text();
 const stageFile = (source: string, destination: string): void => {
   if (resolve(source) === resolve(destination)) return;
@@ -142,6 +160,11 @@ run(
   ["apply", join(root, "native/patches/baresip-wasapi.patch")],
   patchedBaresip,
 );
+run(
+  "git",
+  ["apply", join(root, "native/patches/baresip-pulse.patch")],
+  patchedBaresip,
+);
 if (!openssl && process.platform === "darwin")
   openssl = output("brew", ["--prefix", "openssl@3"]);
 if (windows && !openssl) {
@@ -159,9 +182,9 @@ if (windows && !openssl) {
     "install",
     `--x-manifest-root=${join(root, "native")}`,
     `--x-install-root=${installed}`,
-    "--triplet=x64-windows-static-md",
+    `--triplet=${windowsTriplet}`,
   ]);
-  openssl = join(installed, "x64-windows-static-md");
+  openssl = join(installed, windowsTriplet);
 }
 const common = [
   "-ULIB_EAY*",
@@ -175,11 +198,15 @@ const common = [
 ];
 if (openssl) common.push(`-DOPENSSL_ROOT_DIR=${resolve(openssl)}`);
 if (windows)
-  common.push("-A", "x64", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL");
+  common.push(
+    "-A",
+    windowsArchitecture,
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+  );
 if (process.platform === "darwin")
   common.push(
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
-    "-DCMAKE_OSX_ARCHITECTURES=arm64",
+    `-DCMAKE_OSX_ARCHITECTURES=${process.arch === "arm64" ? "arm64" : "x86_64"}`,
   );
 
 // Resolve and validate dependencies before compiling or replacing staged files.
@@ -274,8 +301,22 @@ for (const file of ["src.c", "play.c", "util.c", "wasapi.h"])
   );
 
 const modules = ["g711", "auconv", "auresamp", "ausine", "aufile", "srtp"];
+const pulseTests = join(prefix, "test/pulse");
+mkdirSync(pulseTests, { recursive: true });
+for (const file of [
+  "pulse.c",
+  "pulse.h",
+  "pastream.c",
+  "player.c",
+  "recorder.c",
+])
+  stageFile(
+    join(patchedBaresip, "modules/pulse", file),
+    join(pulseTests, file),
+  );
 if (process.platform === "darwin") modules.push("coreaudio");
 if (windows) modules.push("wasapi");
+if (process.platform === "linux") modules.push("pulse");
 const bareBuild = join(build, "baresip-policy");
 const reLibrary = join(prefix, "lib", windows ? "re-static.lib" : "libre.a");
 run("cmake", [
@@ -358,6 +399,7 @@ await Bun.write(
         reReliability: reReliabilityPatch,
         baresipReliability: baresipReliabilityPatch,
         baresipWasapi: baresipWasapiPatch,
+        baresipPulse: baresipPulsePatch,
       },
       modules,
       openssl: { prefix: openssl ?? "system", version: resolved.version },

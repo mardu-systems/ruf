@@ -4,6 +4,7 @@ Language detection, persisted selection, `get_localization` and the
 `localization-changed` event are documented in [application language](localization.md).
 
 Build/test CLI contracts are documented separately in [workspace tooling](tooling.md).
+The private Rust/C request boundary is documented in [native adapter ABI](native-adapter.md).
 
 The settings-only company links and compiled software-inventory commands are
 documented in [About-page links and SBOM](about.md).
@@ -228,8 +229,10 @@ loads with compatibility defaults and is backed up before the first replacement;
 see [preference migration](preferences.md). It contains **no passwords**. Same-directory
 file replacement commits metadata. Unsupported/corrupt data is rejected rather
 than overwritten. macOS Keychain Services and Windows Credential Manager are used
-through keyring; other operating systems have no desktop secret-store backend in
-this milestone.
+through keyring. Linux uses the existing desktop store with an encrypted
+Secret Service session on the user bus. Locked/background and foreground-unlock
+behavior is documented in [Linux credential recovery](credential-recovery.md#linux-secret-service);
+there is no plaintext fallback.
 
 Persisted account names, registrar/username syntax, duplicate identities and
 credential keys are validated before engine initialization or credential access.

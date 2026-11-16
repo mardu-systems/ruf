@@ -43,6 +43,7 @@
     "test:sip-lifetimes": "bun scripts/check-sip-lifetimes.ts",
     "test:network-roam": "bun scripts/check-network-roam.ts",
     "test:ui": "bun test tests/ui",
+    "test:linux": "bun scripts/check-linux.ts",
     "test:ui:flows": "bun scripts/check-ui-flows.ts"
   },
   "devDependencies": {

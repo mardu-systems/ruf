@@ -101,3 +101,33 @@ PCM defaults/scaling, peak normalization, exclusive ownership, stale stop
 requests, two-/ten-second limits, incoming preemption and shutdown. Physical
 macOS capture/playback and Windows runtime behavior require explicit local
 verification; synthetic success does not establish either.
+
+## Linux audio
+
+Native Linux builds use baresip's `pulse` backend, with the same audio commands,
+required device IDs, owner tokens and DTOs. PulseAudio or pipewire-pulse is
+required. Inventory enumerates source/sink names without capturing audio, omits
+monitor sources and returns `nativeFailure` after a three-second failure
+deadline. IDs longer than the existing 127-byte backend limit are not offered.
+Invalid/missing device selections continue to reject without replacing settings.
+
+The microphone permission query returns `unsupported`, which never proves
+capture access. Explicit diagnostic capture determines actual availability.
+Connection/stream startup waits for native acceptance with a three-second bound.
+Explicit source/sink IDs pin their streams to the selected device. Removing that
+device terminates capture/playback with an error instead of moving the stream
+to another microphone or speaker. Empty/default routes retain the audio server's
+normal routing policy. Neither failure nor recovery rewrites saved routing.
+
+Terminal audio-server/stream errors are observed on the SIP event loop and end
+active tests/calls with an error. Once all old test, ringtone and call owners have
+been released, that loop clears the backend failure only if the PulseAudio
+connection is ready, checking it under the existing main-loop lock. The existing
+baresip timer owns the bounded server reconnect attempts. A reappearing selected
+device or recovered server can then serve a new test/call in the same Ruf process;
+failed calls are not resumed. Stale test tokens cannot stop a new capture.
+
+Teardown retains the owning connection and disables callbacks under its lock;
+workers never destroy/join themselves and output teardown does not wait
+indefinitely for a flush. Test-tone/file interoperability remains independent
+of system-audio availability.

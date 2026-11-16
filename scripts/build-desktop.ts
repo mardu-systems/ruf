@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { basename as fileName, dirname, join, resolve } from "node:path";
 import type { SoftwareBill } from "../apps/desktop/src/lib/software-bill.ts";
 import { desktopContext } from "./desktop-context.ts";
+import { desktopInstallers } from "./desktop-artifacts.ts";
 
 await import("./check-versions.ts");
 
@@ -81,27 +82,13 @@ if (!dev) {
   };
   const destinations = [output];
   if (!args.includes("--no-bundle")) {
-    for (const [folder, extension] of [
-      ["dmg", ".dmg"],
-      ["nsis", ".exe"],
-    ] as const) {
-      const directory = join(output, "bundle", folder);
-      let files;
-      try {
-        files = readdirSync(directory);
-      } catch {
-        continue;
-      }
-      for (const file of files) {
-        const path = join(directory, file);
-        if (!file.endsWith(extension) || statSync(path).mtimeMs < started)
-          continue;
-        evidence.installers.push({
-          file,
-          sha256: digest(await Bun.file(path).bytes()),
-        });
-        if (!destinations.includes(directory)) destinations.push(directory);
-      }
+    for (const path of desktopInstallers(output, started)) {
+      evidence.installers.push({
+        file: fileName(path),
+        sha256: digest(await Bun.file(path).bytes()),
+      });
+      const directory = dirname(path);
+      if (!destinations.includes(directory)) destinations.push(directory);
     }
   }
   for (const directory of destinations) {

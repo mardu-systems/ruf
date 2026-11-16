@@ -1,5 +1,19 @@
 # Was ist neu in Ruf?
 
+## Unveröffentlicht · Entwicklungsstand
+
+- Baue den nativen Linux-Desktop für GNU x64 oder ARM64 als DEB-, RPM- oder AppImage-Paket. Die veröffentlichten 0.1.1-Installer enthalten diese Entwicklungsänderungen noch nicht.
+- Nutze unter Linux Secret Service für verschlüsselt gespeicherte Kontopasswörter, Desktop-Mitteilungen mit Annehmen/Ablehnen, Tray-/Hintergrundbetrieb und Autostart der installierten App.
+- Wähle unter Linux Mikrofon, Gesprächs- und Klingelton-Ausgabe getrennt über PulseAudio oder pipewire-pulse. Feste Routen bleiben am gewählten Gerät; nach Freigabe fehlgeschlagener Vorgänge und Rückkehr des Geräts oder Audioservers funktionieren neue Tests und Anrufe wieder.
+- Beobachte bis zu 32 Nebenstellen pro Konto über natives SIP-BLF. Zeige unbekannt, frei, klingelnd und besetzt an; die Telefonanlage muss Dialog-Abonnements unterstützen und erlauben.
+- Baue Ruf nativ für Apple Silicon und Intel mit macOS 14 als Mindestversion. Ergänze ein experimentelles natives Windows-ARM64-Buildziel, das nicht in Release-Entwürfe aufgenommen wird.
+- Verbessere native Windows-Audiofehler beim Start, die Verwendung des Standard-Kommunikationsgeräts und die Wiederherstellung nach Gerätefehlern. Ergänze Mikrofon- und Lautsprechertests ohne eingerichtetes SIP-Konto.
+- Nutze eine kompaktere Telefonansicht, einen einfacheren Erststart und verbesserte Wiederherstellung von Fenstern, Tastatur- und Gesprächsaktionen.
+- Aktualisiere die native baresip/libre-Engine auf 4.13.0 und verbessere Gesprächssynchronisierung und das Beenden der Engine.
+- Vereinfache den macOS-DMG-Hintergrund zum Ziehen in den Programme-Ordner und behalte die Retina-Grafik bei.
+- Begrenze PR-Prüfungen auf Linux x64, macOS ARM64 und Windows x64; Hauptbranch, manuelle Läufe und Releases behalten alle sechs nativen Ziele. Behalte Paket-, native Telefonie- und Sicherheitsprüfungen für die ausgewählten Plattformen bei.
+- Bestätige echtes Mikrofonsignal und hörbares Sprachecho in Ubuntu/GNOME- und Fedora/KDE-ARM64-VMs. Physisches Abziehen/Wiederanschließen eines Linux-Headsets und die Windows-Hardware-Abnahme bleiben offen.
+
 ## 0.1.1 · Vorschau
 
 - Kostenlose Developer Preview mit deutscher und englischer Telefonoberfläche, Einstellungen, nativen Menüs und App-Mitteilungen. Keine In-App-Käufe.

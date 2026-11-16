@@ -60,6 +60,18 @@ with `localization` selecting only the language-switch/changelog-race flow.
 An unsupported `SIP_UI_LANGUAGE` fails the command. These are test-runner
 controls, not application preference or language overrides.
 
+## Desktop CI matrix
+
+`bun scripts/desktop-matrix.ts pr|full` is the CI target selector. Exactly one
+scope is required; `GITHUB_OUTPUT` must name the runner's output file. `pr`
+selects Linux x64, macOS ARM64 and Windows x64; `full` retains all six native
+targets, including experimental Windows ARM64. Success appends one
+`matrix={"include":[...]}` JSON line containing runner, target, bundle formats,
+artifact globs and OpenSSL cache/recipe metadata. Unsupported/missing scope,
+extra arguments, missing output path or filesystem failures exit nonzero.
+The reusable desktop workflow defaults to the full scope; its PR caller selects
+the reduced scope. The selector does not build or publish artifacts.
+
 ## Native network and media regressions
 
 `bun run test:network-roam` requires the pinned Rust toolchain, a C compiler,
@@ -116,15 +128,18 @@ conversion exit nonzero. See [media provenance](../screenshots/README.md).
 Native workspace tests still return failure when any Cargo partition fails and
 retain its logs. `bun run test:native` accepts only the optional `--adapter` flag
 for headless adapter checks; other arguments fail before building. It builds the
-selected suite once, discovers native libtest names and requires both the NAT and
-SIP modules. Discovery/build errors exit nonzero rather than silently running an
+selected suite once, reads its test executable paths from Cargo JSON artifacts,
+discovers native libtest names and requires both the NAT and SIP modules. Discovery/build errors exit nonzero rather than silently running an
 empty native suite.
 
 At most six test processes run together. Each NAT test and SIP test whose name
 identifies a timeout/deadline, missing ACK, refused compensation, bounded failure
 or long local hold runs separately with an exact filter. Ordinary SIP tests and
-remaining workspace/integration/doc tests stay covered without repeating those
-isolated tests. Existing ignored-test behavior and timer durations are unchanged.
+remaining workspace/integration tests stay covered without repeating those
+isolated tests. The compiled executables run directly from their package directories, matching
+Cargo's working-directory behavior, so no parallel Cargo build
+can replace another partition's binary. Cargo doc tests run afterward, even if a
+partition failed; their failures also fail the command. Existing ignored-test behavior and timer durations are unchanged.
 
 Both stdout/stderr streams appear immediately with `[native:<partition>]` prefixes,
 including partial lines; matching raw bytes are kept in each partition's `.log`.

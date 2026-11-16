@@ -5,18 +5,10 @@ use phone_core::{
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
 };
 
-// Private bridge operations; values mirror native/bridge.c.
-const OP_MUTE: i32 = 17;
-const OP_HOLD: i32 = 18;
-const OP_TRANSFER: i32 = 19;
-const OP_CONSULT: i32 = 20;
-const OP_SWITCH: i32 = 21;
-const OP_CANCEL_CONSULT: i32 = 22;
-const OP_COMPLETE_TRANSFER: i32 = 23;
-const OP_DTMF: i32 = 24;
+use crate::protocol::*;
 
 #[derive(Default)]
 pub(crate) struct EngineState {
@@ -25,6 +17,7 @@ pub(crate) struct EngineState {
     #[cfg(feature = "native")]
     pub(crate) terminal_call_errors: BTreeMap<u64, PhoneError>,
     pub(crate) call_generation: u64,
+    pub(crate) pending_dial: Option<phone_core::CallSnapshot>,
     pub(crate) call_journal: crate::call_journal::CallJournal,
     #[cfg(feature = "native")]
     pub(crate) blf_dialogs: BTreeMap<(u32, String), crate::blf::DialogInfo>,
@@ -34,18 +27,13 @@ pub(crate) struct EngineState {
     pub(crate) stopped: bool,
     pub(crate) sound_result: Option<Result<(), PhoneError>>,
     #[cfg(feature = "native")]
-    pub(crate) remote_hold: bool,
-    #[cfg(feature = "native")]
-    pub(crate) local_ending: bool,
-    #[cfg(feature = "native")]
     pub(crate) local_endings: std::collections::BTreeSet<u64>,
-    #[cfg(feature = "native")]
-    pub(crate) call_destinations: BTreeMap<u64, String>,
 }
 
 impl EngineState {
     pub(crate) fn snapshot_for_read(&self) -> EngineSnapshot {
         let mut snapshot = self.snapshot.clone();
+        self.project_selected_dialog(&mut snapshot);
         if snapshot.last_error.is_none() {
             snapshot.last_error = self.engine_error.clone();
         }
@@ -56,6 +44,7 @@ impl EngineState {
 /// One owned native engine, up to eight SIP accounts, one original call and one consultation.
 pub struct Engine {
     snapshot: Arc<Mutex<EngineState>>,
+    changed: Arc<Condvar>,
     audio: AudioMode,
     #[cfg(feature = "native")]
     native: crate::ffi::NativeEngine,
@@ -110,10 +99,18 @@ impl Engine {
                 },
                 ..Default::default()
             }));
-            let native =
-                crate::ffi::NativeEngine::start(Arc::clone(&snapshot), audio, recording, ca, dns)?;
+            let changed = Arc::new(Condvar::new());
+            let native = crate::ffi::NativeEngine::start(
+                Arc::clone(&snapshot),
+                Arc::clone(&changed),
+                audio,
+                recording,
+                ca,
+                dns,
+            )?;
             Ok(Self {
                 snapshot,
+                changed,
                 audio,
                 native,
             })
@@ -158,8 +155,7 @@ impl Engine {
         settings.validate()?;
         self.reserve_sound_operation()?;
         #[cfg(feature = "native")]
-        self.native
-            .sound_request(if restore { 10 } else { 7 }, settings)?;
+        self.native.sound_request(restore, settings)?;
         #[cfg(not(feature = "native"))]
         {
             let _ = restore;
@@ -186,7 +182,7 @@ impl Engine {
         self.reserve_sound_operation()?;
         #[cfg(feature = "native")]
         {
-            self.native.preview_request(8, device)?;
+            self.native.audio_test_request(OP_PREVIEW, 0, device)?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]
@@ -202,7 +198,7 @@ impl Engine {
             .sound_result = None;
         #[cfg(feature = "native")]
         {
-            self.native.preview_request(9, "")?;
+            self.native.audio_test_request(OP_PREVIEW_STOP, 0, "")?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]
@@ -251,8 +247,8 @@ impl Engine {
                 .audio_test_error = None;
             self.native.audio_test_request(
                 match kind {
-                    AudioTestKind::Microphone => 12,
-                    AudioTestKind::Speaker => 13,
+                    AudioTestKind::Microphone => OP_TEST_MIC,
+                    AudioTestKind::Speaker => OP_TEST_SPEAKER,
                 },
                 id,
                 device,
@@ -283,7 +279,7 @@ impl Engine {
                 .lock()
                 .map_err(|_| state_error())?
                 .sound_result = None;
-            self.native.audio_test_request(14, token, "")?;
+            self.native.audio_test_request(OP_TEST_STOP, token, "")?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]
@@ -297,7 +293,7 @@ impl Engine {
     }
     fn reserve_sound_operation(&self) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        if state.snapshot.call != CallState::Idle
+        if state.call_state() != CallState::Idle
             || state.snapshot.audio_test.is_some()
             || state.snapshot.ringtone_playing
         {
@@ -311,17 +307,22 @@ impl Engine {
     }
     #[cfg(feature = "native")]
     fn wait_sound_operation(&self) -> Result<(), PhoneError> {
+        self.wait_for_result(|state| state.sound_result.take())
+    }
+
+    fn wait_for_result(
+        &self,
+        mut result: impl FnMut(&mut EngineState) -> Option<Result<(), PhoneError>>,
+    ) -> Result<(), PhoneError> {
+        let mut state = self.snapshot.lock().map_err(|_| state_error())?;
         loop {
-            {
-                let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-                if let Some(result) = state.sound_result.take() {
-                    return result;
-                }
-                if state.stopped {
-                    return Err(state_error());
-                }
+            if let Some(result) = result(&mut state) {
+                return result;
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            if state.stopped {
+                return Err(state_error());
+            }
+            state = self.changed.wait(state).map_err(|_| state_error())?;
         }
     }
 
@@ -353,7 +354,7 @@ impl Engine {
             ));
         }
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        if state.snapshot.call != CallState::Idle {
+        if state.call_state() != CallState::Idle {
             return Err(PhoneError::new(
                 ErrorCode::Busy,
                 "End the current call before changing accounts.",
@@ -410,13 +411,7 @@ impl Engine {
             .iter()
             .find(|a| a.id == id)
             .is_none_or(|a| a.enabled);
-        self.request(
-            1,
-            id,
-            Some(config),
-            Some(if enabled { "1" } else { "0" }),
-            0,
-        )?;
+        self.account_request(OP_ACCOUNT, id, Some(config), enabled)?;
         #[cfg(feature = "native")]
         state
             .blf_dialogs
@@ -470,7 +465,7 @@ impl Engine {
     ) -> Result<(), PhoneError> {
         {
             let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-            if state.snapshot.call != CallState::Idle || state.pending_accounts.contains_key(&id) {
+            if state.call_state() != CallState::Idle || state.pending_accounts.contains_key(&id) {
                 return Err(PhoneError::new(
                     ErrorCode::Busy,
                     "End the call or pending account update before changing activation.",
@@ -506,7 +501,12 @@ impl Engine {
                     ));
                 }
             }
-            self.request(if enabled { 16 } else { 15 }, id, config, Some("1"), 0)?;
+            self.account_request(
+                if enabled { OP_ENABLE } else { OP_DISABLE },
+                id,
+                config,
+                enabled,
+            )?;
             state.pending_accounts.insert(id, Some(previous));
             state.account_results.remove(&id);
             let account = state
@@ -561,41 +561,21 @@ impl Engine {
     /// Wait for the native queue to apply or reject a configuration, not for SIP registration.
     /// Native shutdown rejects pending operations; a delayed operation is never abandoned.
     pub fn wait_account_update(&self, id: u32) -> Result<(), PhoneError> {
-        loop {
-            {
-                let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-                if let Some(result) = state.account_results.remove(&id) {
-                    return result;
-                }
-                if state.stopped {
-                    return Err(state_error());
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        self.wait_for_result(|state| state.account_results.remove(&id))
     }
 
     /// Wait for native deletion or rejection, so durable storage cannot race a live UA.
     pub fn wait_account_removed(&self, id: u32) -> Result<(), PhoneError> {
-        loop {
-            {
-                let state = self.snapshot.lock().map_err(|_| state_error())?;
-                match state.snapshot.accounts.iter().find(|a| a.id == id) {
-                    None => return Ok(()),
-                    Some(account) if !account.removing => {
-                        return Err(PhoneError::new(
-                            ErrorCode::Busy,
-                            "An incoming call prevented account removal.",
-                        ));
-                    }
-                    _ => {}
-                }
-                if state.stopped {
-                    return Err(state_error());
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        self.wait_for_result(
+            |state| match state.snapshot.accounts.iter().find(|a| a.id == id) {
+                None => Some(Ok(())),
+                Some(account) if !account.removing => Some(Err(PhoneError::new(
+                    ErrorCode::Busy,
+                    "An incoming call prevented account removal.",
+                ))),
+                _ => None,
+            },
+        )
     }
 
     /// Restore non-secret metadata when a saved password could not be read.
@@ -649,17 +629,16 @@ impl Engine {
 
     /// Change the outgoing account without disconnecting the other registered accounts.
     pub fn select_account(&mut self, id: u32) -> Result<(), PhoneError> {
-        self.snapshot
-            .lock()
-            .map_err(|_| state_error())?
-            .snapshot
-            .select_account(id)
+        let mut state = self.snapshot.lock().map_err(|_| state_error())?;
+        // Reuse the public validation against the derived, current call state.
+        state.snapshot_for_read().select_account(id)?;
+        state.snapshot.select_account(id)
     }
 
     /// Queue removal while idle; the native confirmation removes its public metadata.
     pub fn remove_account(&mut self, id: u32) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        if state.snapshot.call != CallState::Idle {
+        if state.call_state() != CallState::Idle {
             return Err(PhoneError::new(
                 ErrorCode::Busy,
                 "End the current call before removing accounts.",
@@ -679,7 +658,7 @@ impl Engine {
             .ok_or_else(|| {
                 PhoneError::new(ErrorCode::InvalidInput, "Unknown or removing account.")
             })?;
-        self.request(6, id, None, None, 0)?;
+        self.request(OP_REMOVE, id, None, 0, false)?;
         account.removing = true;
         state.snapshot.sync_selected_registration();
         Ok(())
@@ -691,34 +670,29 @@ impl Engine {
             .ok_or_else(|| PhoneError::new(ErrorCode::InvalidInput, "Invalid telephone number."))?;
         let destination = target.as_str();
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        let previous = state.snapshot.clone();
-        state.snapshot.reserve_dial(destination)?;
-        // Reserve the native token before returning: an immediate hangup must
-        // target this queued attempt even before its first native callback.
+        let mut reservation = state.snapshot_for_read();
+        reservation.reserve_dial(destination)?;
         #[cfg(feature = "native")]
-        let generation = match self.native.reserve_call_generation() {
-            Ok(generation) => generation,
-            Err(error) => {
-                state.snapshot = previous;
-                return Err(error);
-            }
-        };
+        let generation = self.native.reserve_call_generation()?;
         #[cfg(not(feature = "native"))]
         let generation = state.call_generation;
-        let previous_generation = state.call_generation;
-        state.call_generation = generation;
-        state.snapshot.call_id = Some(generation.to_string());
-        if let Err(error) = self.request(
-            2,
+        self.request(
+            OP_DIAL,
             state.snapshot.selected_account_id.unwrap_or(0),
-            None,
             Some(destination),
             generation,
-        ) {
-            state.call_generation = previous_generation;
-            state.snapshot = previous;
-            return Err(error);
-        }
+            false,
+        )?;
+        let mut call = crate::dialogs::new_dialog(
+            generation,
+            state.snapshot.selected_account_id.unwrap_or(0),
+            CallState::Calling,
+        );
+        call.destination = Some(target);
+        state.pending_dial = Some(call);
+        state.call_generation = generation;
+        state.snapshot.last_call_failure = None;
+        state.snapshot.last_error = None;
         Ok(())
     }
 
@@ -735,33 +709,23 @@ impl Engine {
 
     fn answer_current(&self, call_id: Option<&str>) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        validate_call_token(&state.snapshot, call_id)?;
-        if state.snapshot.call != CallState::Incoming {
+        validate_call_token(&state.snapshot_for_read(), call_id)?;
+        if state.call_state() != CallState::Incoming {
             return Err(PhoneError::new(
                 ErrorCode::InvalidState,
                 "No incoming call to answer.",
             ));
         }
-        state.snapshot.call = CallState::Answering;
-        let id = state.snapshot.call_id.clone();
-        if let Some(call) = state
+        let generation = state.call_generation;
+        let call = state
             .snapshot
             .calls
             .iter_mut()
-            .find(|call| Some(&call.id) == id.as_ref())
-        {
-            call.state = CallState::Answering;
-        }
-        if let Err(error) = self.request(3, 0, None, None, state.call_generation) {
-            state.snapshot.call = CallState::Incoming;
-            if let Some(call) = state
-                .snapshot
-                .calls
-                .iter_mut()
-                .find(|call| Some(&call.id) == id.as_ref())
-            {
-                call.state = CallState::Incoming;
-            }
+            .find(|call| call.id == generation.to_string())
+            .ok_or_else(state_error)?;
+        call.state = CallState::Answering;
+        if let Err(error) = self.request(OP_ANSWER, 0, None, generation, false) {
+            call.state = CallState::Incoming;
             return Err(error);
         }
         Ok(())
@@ -783,28 +747,28 @@ impl Engine {
     /// The native queue repeats this guard before executing, so a late reject cannot end a call.
     pub fn reject_call(&mut self, call_id: &str) -> Result<(), PhoneError> {
         let state = self.snapshot.lock().map_err(|_| state_error())?;
-        validate_call_token(&state.snapshot, Some(call_id))?;
-        if state.snapshot.call != CallState::Incoming {
+        validate_call_token(&state.snapshot_for_read(), Some(call_id))?;
+        if state.call_state() != CallState::Incoming {
             return Err(PhoneError::new(
                 ErrorCode::InvalidState,
                 "No unanswered incoming call to reject.",
             ));
         }
-        self.request(11, 0, None, None, state.call_generation)
+        self.request(OP_REJECT, 0, None, state.call_generation, false)
     }
 
     fn hangup_current(&self, call_id: Option<&str>) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
         let generation = if let Some(id) = call_id {
             if !state.snapshot.calls.iter().any(|call| call.id == id)
-                && state.snapshot.call_id.as_deref() != Some(id)
+                && state.selected_dialog().map(|call| call.id.as_str()) != Some(id)
             {
                 return Err(PhoneError::new(
                     ErrorCode::InvalidState,
                     "The call changed before this action was submitted.",
                 ));
             }
-            if state.snapshot.call_id.as_deref() == Some(id) {
+            if state.selected_dialog().map(|call| call.id.as_str()) == Some(id) {
                 state.call_generation
             } else {
                 id.parse().map_err(|_| state_error())?
@@ -812,10 +776,10 @@ impl Engine {
         } else {
             state.call_generation
         };
-        if state.snapshot.call == CallState::Idle {
+        if state.call_state() == CallState::Idle {
             return Err(PhoneError::new(ErrorCode::InvalidState, "No call to end."));
         }
-        self.request(4, 0, None, None, generation)?;
+        self.request(OP_HANGUP, 0, None, generation, false)?;
         if let Some(call) = state
             .snapshot
             .calls
@@ -832,16 +796,16 @@ impl Engine {
 
     /// Mute/unmute outgoing audio for a live established dialog; confirmation arrives natively.
     pub fn set_call_muted(&mut self, call_id: &str, muted: bool) -> Result<(), PhoneError> {
-        self.call_control(call_id, OP_MUTE, Some(if muted { "1" } else { "0" }))
+        self.call_control(call_id, OP_MUTE, None, muted)
     }
     /// Request local hold/resume. Confirmation requires an accepted SIP answer.
     pub fn set_call_held(&mut self, call_id: &str, held: bool) -> Result<(), PhoneError> {
-        self.call_control(call_id, OP_HOLD, Some(if held { "1" } else { "0" }))
+        self.call_control(call_id, OP_HOLD, None, held)
     }
     /// Send blind REFER to a validated numeric destination and await final NOTIFY.
     pub fn transfer_call(&mut self, call_id: &str, destination: &str) -> Result<(), PhoneError> {
         let target = self.validate_control_destination(destination)?;
-        self.call_control(call_id, OP_TRANSFER, Some(&target))
+        self.call_control(call_id, OP_TRANSFER, Some(&target), false)
     }
     /// Hold the original before dialing one consultation on the same owning account.
     pub fn start_consultation(
@@ -850,19 +814,19 @@ impl Engine {
         destination: &str,
     ) -> Result<(), PhoneError> {
         let target = self.validate_control_destination(destination)?;
-        self.call_control(call_id, OP_CONSULT, Some(&target))
+        self.call_control(call_id, OP_CONSULT, Some(&target), false)
     }
     /// Select a live conversation after confirmed hold of the previously audible dialog.
     pub fn switch_call(&mut self, call_id: &str) -> Result<(), PhoneError> {
-        self.call_control(call_id, OP_SWITCH, None)
+        self.call_control(call_id, OP_SWITCH, None, false)
     }
     /// End the consultation and resume the surviving original.
     pub fn cancel_consultation(&mut self, call_id: &str) -> Result<(), PhoneError> {
-        self.call_control(call_id, OP_CANCEL_CONSULT, None)
+        self.call_control(call_id, OP_CANCEL_CONSULT, None, false)
     }
     /// Send REFER/Replaces using the original and established consultation dialogs.
     pub fn complete_transfer(&mut self, call_id: &str) -> Result<(), PhoneError> {
-        self.call_control(call_id, OP_COMPLETE_TRANSFER, None)
+        self.call_control(call_id, OP_COMPLETE_TRANSFER, None, false)
     }
     /// Queue one 0–9, star or hash tone for the selected, established, unheld call.
     /// Native baresip owns duration/release and negotiated RTP-event/SIP-INFO transport.
@@ -878,35 +842,37 @@ impl Engine {
                 "One telephone digit is required.",
             ));
         }
-        self.call_control(call_id, OP_DTMF, Some(digit))
+        self.call_control(call_id, OP_DTMF, Some(digit), false)
     }
     fn validate_control_destination(&self, destination: &str) -> Result<String, PhoneError> {
-        let mut snapshot = EngineSnapshot {
-            registration: RegistrationState::Registered,
-            ..Default::default()
-        };
-        snapshot.reserve_dial(destination)?;
         phone_core::contact_dial_target(destination)
-            .ok_or_else(|| PhoneError::new(ErrorCode::InvalidInput, "Invalid telephone number."))
+            .ok_or_else(|| {
+                PhoneError::new(
+                    ErrorCode::InvalidInput,
+                    "Dial a number or extension of at most 64 characters; SIP URIs are not supported yet.",
+                )
+            })
     }
     fn call_control(
         &self,
         call_id: &str,
         operation: i32,
         destination: Option<&str>,
+        enabled: bool,
     ) -> Result<(), PhoneError> {
         let mut state = self.snapshot.lock().map_err(|_| state_error())?;
-        let call = state
+        let index = state
             .snapshot
             .calls
             .iter()
-            .find(|call| call.id == call_id)
+            .position(|call| call.id == call_id)
             .ok_or_else(|| {
                 PhoneError::new(
                     ErrorCode::InvalidState,
                     "The call changed before this action was submitted.",
                 )
             })?;
+        let call = &state.snapshot.calls[index];
         if operation != OP_MUTE
             && state.snapshot.calls.iter().any(|call| {
                 call.hold_pending || call.transfer == phone_core::TransferState::Pending
@@ -926,7 +892,7 @@ impl Engine {
             ));
         }
         if operation == OP_DTMF
-            && (state.snapshot.call_id.as_deref() != Some(call_id)
+            && (state.selected_dialog().map(|call| call.id.as_str()) != Some(call_id)
                 || call.local_held
                 || call.remote_held)
         {
@@ -968,16 +934,9 @@ impl Engine {
             ));
         }
         let generation = call.id.parse().map_err(|_| state_error())?;
-        self.request(operation, call.account_id, None, destination, generation)?;
-        if let Some(call) = state
-            .snapshot
-            .calls
-            .iter_mut()
-            .find(|call| call.id == call_id)
-        {
-            call.last_error = None;
-        }
-        if state.snapshot.call_id.as_deref() == Some(call_id) {
+        self.request(operation, call.account_id, destination, generation, enabled)?;
+        state.snapshot.calls[index].last_error = None;
+        if state.selected_dialog().map(|call| call.id.as_str()) == Some(call_id) {
             state.snapshot.last_error = None;
         }
         Ok(())
@@ -995,22 +954,43 @@ impl Engine {
         }
     }
 
+    fn account_request(
+        &self,
+        operation: i32,
+        id: u32,
+        config: Option<&AccountConfig>,
+        enabled: bool,
+    ) -> Result<(), PhoneError> {
+        #[cfg(feature = "native")]
+        {
+            self.native.account_request(operation, id, config, enabled)
+        }
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (operation, id, config, enabled);
+            Err(PhoneError::new(
+                ErrorCode::EngineUnavailable,
+                "Native support is not linked.",
+            ))
+        }
+    }
+
     fn request(
         &self,
         operation: i32,
         account_id: u32,
-        account: Option<&AccountConfig>,
         destination: Option<&str>,
         call_generation: u64,
+        enabled: bool,
     ) -> Result<(), PhoneError> {
         #[cfg(feature = "native")]
         {
             self.native
-                .request(operation, account_id, account, destination, call_generation)
+                .request(operation, account_id, destination, call_generation, enabled)
         }
         #[cfg(not(feature = "native"))]
         {
-            let _ = (operation, account_id, account, destination, call_generation);
+            let _ = (operation, account_id, destination, call_generation, enabled);
             Err(PhoneError::new(
                 ErrorCode::EngineUnavailable,
                 "Native support is not linked.",
@@ -1386,7 +1366,7 @@ mod interop_tests {
             // The native call slot must reject it and restore the old identity.
             if *id == ids[0] {
                 let before = engine.snapshot().unwrap().accounts[0].clone();
-                engine.snapshot.lock().unwrap().snapshot.call = CallState::Idle;
+                engine.snapshot.lock().unwrap().snapshot.calls[0].state = CallState::Idle;
                 let replacement = AccountConfig {
                     monitored_extensions: Vec::new(),
                     transport: Default::default(),
@@ -1407,7 +1387,7 @@ mod interop_tests {
                     (after.id, after.name, after.username),
                     (before.id, before.name, before.username)
                 );
-                engine.snapshot.lock().unwrap().snapshot.call = CallState::Active;
+                engine.snapshot.lock().unwrap().snapshot.calls[0].state = CallState::Active;
             }
 
             assert_eq!(
@@ -1498,7 +1478,7 @@ mod interop_tests {
             engine.snapshot.lock().unwrap().snapshot.last_error = None;
             engine
                 .native
-                .request(operation, 0, None, None, generation_a)
+                .request(operation, 0, None, generation_a, false)
                 .unwrap();
             wait(&engine, |s| {
                 s.call == CallState::Idle || s.last_error.is_some()
@@ -1524,13 +1504,13 @@ mod action_tests {
         Engine {
             snapshot: Arc::new(Mutex::new(EngineState {
                 snapshot: EngineSnapshot {
-                    call: CallState::Incoming,
-                    call_id: Some("current".into()),
+                    calls: vec![crate::dialogs::new_dialog(9, 42, CallState::Incoming)],
                     ..Default::default()
                 },
                 call_generation: 9,
                 ..Default::default()
             })),
+            changed: Arc::new(Condvar::new()),
             audio: AudioMode::TestTone,
         }
     }
@@ -1560,19 +1540,19 @@ mod action_tests {
     fn rejected_answer_queue_restores_incoming_reservation() {
         let mut engine = incoming();
         assert_eq!(
-            engine.answer_call("current").unwrap_err().code,
+            engine.answer_call("9").unwrap_err().code,
             ErrorCode::EngineUnavailable
         );
         let snapshot = engine.snapshot().unwrap();
         assert_eq!(snapshot.call, CallState::Incoming);
-        assert_eq!(snapshot.call_id.as_deref(), Some("current"));
+        assert_eq!(snapshot.call_id.as_deref(), Some("9"));
     }
     #[test]
     fn answering_rejects_a_second_answer() {
         let mut engine = incoming();
-        engine.snapshot.lock().unwrap().snapshot.call = CallState::Answering;
+        engine.snapshot.lock().unwrap().snapshot.calls[0].state = CallState::Answering;
         assert_eq!(
-            engine.answer_call("current").unwrap_err().code,
+            engine.answer_call("9").unwrap_err().code,
             ErrorCode::InvalidState
         );
     }

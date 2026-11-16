@@ -892,5 +892,8 @@
   "validation.outboundProxy": "Enter a proxy server address, optionally with :port. Do not include sip:, parameters or a path.",
   "validation.password": "Enter your SIP password (up to 1024 bytes, without null characters).",
   "validation.registrar": "Enter the server address, optionally with :port. Do not include sip:, spaces or a path.",
-  "validation.username": "Use the SIP username from your credentials (up to 80 characters), rather than an email address."
+  "validation.username": "Use the SIP username from your credentials (up to 80 characters), rather than an email address.",
+  "settings.linux_microphone_help": "Linux does not expose a general microphone permission status here. Check access with the microphone test under Sound.",
+  "settings.notification_service_available": "Desktop notifications available",
+  "settings.linux_notifications_help": "Your desktop supports notifications with call actions. Whether they appear depends on your system settings and Do Not Disturb."
 }

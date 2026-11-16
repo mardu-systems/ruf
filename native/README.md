@@ -40,12 +40,15 @@ mute/hold/resume APIs. Upstream transmit-thread start/stop helpers are private a
 need no adapter calls. Custom close headers and optional AMR/ZRTP/WebRTC-AEC
 modules are not enabled without a product requirement. The eight existing patches
 remain; only the NAT-test and call-control-header contexts needed rebasing. A ninth
-patch now hardens WASAPI startup, stream recovery and error observation; see the
+patch hardens WASAPI startup, stream recovery and error observation; a tenth
+patch adds bounded PulseAudio startup and safe terminal-failure observation; see the
 [patch contracts](patches/README.md#wasapi-worker-lifetime-and-output-status).
 See the [behavioral contract](../docs/api/sip-events.md#native-sdk-413).
 
-Supported build hosts: macOS arm64, Windows MSVC x64; Linux x64/arm64 is available
-for headless interoperability tests. Cross compilation is not implemented.
+Native build hosts are macOS ARM64/Intel, Windows MSVC x64/ARM64 and Linux GNU
+x64/ARM64. Windows ARM64 and the Linux desktop remain experimental; headless
+Linux interoperability uses the same SDK.
+See [Linux desktop prerequisites and acceptance](../docs/linux.md). Cross compilation is not implemented.
 
 Desktop CI caches only `native/install/<target>/`, including the SDK's NAT test
 executable. An exact key covers the runner image, compiler/CMake identity, source
@@ -67,7 +70,9 @@ static install uses the checksum-pinned `build-openssl-macos.sh` recipe, and
 Windows retains its pinned vcpkg installed tree. Their exact target/compiler keys
 do not depend on baresip/libre pins or local SIP patches. SDK discovery still
 validates the resulting headers/static libraries and macOS minimum. Both cache
-layers are saved only from non-PR runs after SDK qualification; see
+layers are saved after SDK qualification on non-PR and same-repository PR runs.
+Fork PRs remain restore-only; GitHub isolates each PR's writes from protected
+branch caches. See
 [CI cache behavior](../docs/ci-cd.md).
 
 ## Prerequisites
@@ -77,11 +82,13 @@ layers are saved only from non-PR runs after SDK qualification; see
 - Windows: Visual Studio 2022 C++ tools/Windows SDK, CMake and vcpkg.
   Set `VCPKG_INSTALLATION_ROOT` to vcpkg's checkout. GitHub's Windows runner
   supplies it. The manifest uses a pinned baseline and `x64-windows-static-md`
-  OpenSSL, matching the dynamic MSVC CRT used by Rust.
+  or `arm64-windows-static-md`, selected from the native host architecture, for
+  OpenSSL, matching the dynamic MSVC CRT used by Rust. ARM64 requires the Visual
+  Studio ARM64 C++ tools and a native ARM64 Bun/Rust toolchain; x64 remains x64.
   The SDK fetches the exact manifest baseline into that checkout if an older
   runner image lacks it; it does not switch the checkout or advance the pin.
 - Linux: CMake, GCC/Clang, pkg-config and OpenSSL development/static libraries
-  (`sudo apt-get install cmake libssl-dev pkg-config` on Ubuntu).
+  (`sudo apt-get install cmake libssl-dev libpulse-dev pkg-config` on Ubuntu).
 
 `OPENSSL_ROOT_DIR` can select a compatible static OpenSSL installation explicitly.
 The generated SDK manifest records resolved OpenSSL version/prefix, source pins,
@@ -152,11 +159,14 @@ Account replacement with the same audio backend is supported only while idle.
 Native packages: `bun run desktop:build --features native --bundles app`
 on macOS, or `--bundles nsis` on Windows. CI selects explicit target triples.
 Without `native`, no SDK is needed and telephony reports `notLinked`.
+Linux native packages use `--bundles deb,rpm,appimage`; see the
+[platform matrix](../docs/platforms.md) for distro/CPU coverage.
 
 ## Selected functionality
 
 Static modules: `g711`, `auconv`, `auresamp`, `ausine`, `aufile`, `srtp`, plus `coreaudio`
-on macOS or `wasapi` on Windows. Audio stays entirely within baresip. Test-tone
+on macOS, `wasapi` on Windows or `pulse` on Linux. Linux links the system
+libpulse and also supports PipeWire through pipewire-pulse. Audio stays entirely within baresip. Test-tone
 mode uses 440 Hz input and writes decoded incoming PCM to WAV; system mode uses
 the platform microphone/speaker and requires manual device/permission testing.
 The file player's upstream path buffer allows at most 127 UTF-8 bytes; a longer
@@ -258,3 +268,14 @@ cargo run --locked -p baresip-adapter --features native --example sound_smoke
 
 It queries real devices, routes to a selectable output, rejects an invalid device,
 and checks preview start/stop/completion. Windows execution is still required.
+
+## Intel macOS
+
+The pinned OpenSSL recipe supports both native macOS CPU families. ARM64 keeps
+`native/build/openssl-macos14/install`; Intel uses
+`native/build/openssl-macos14-x86_64/install` with `darwin64-x86_64-cc`. Select
+the matching `OPENSSL_ROOT_DIR` before the native build. CMake verifies archive
+CPU/deployment metadata using `lipo <archive> -verify_arch <cpu>` (the input must
+precede the architecture list for older Apple tools), and the SDK builder requires the matching Rust host
+triple. Source pins, patches and macOS 14 minimum are identical. SDKs and SBOMs
+remain separate; a universal Rust target cannot substitute for a native SDK.

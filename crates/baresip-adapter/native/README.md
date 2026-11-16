@@ -67,6 +67,18 @@ established call. Portable builds reject startup with `engineUnavailable`.
 Real lifecycle tests and the Asterisk tone-echo example exercise the actual
 library. Hardware devices and Windows runtime still require platform execution.
 
+The [private ABI contract](../../../docs/api/native-adapter.md) describes the
+single named request in `bridge.h`. Its event and
+operation codes come from `protocol.def` for both C and generated private Rust
+constants. Audio devices and mute/hold flags have named fields; they are not
+encoded as account credentials or destination strings. C copies a request and
+its populated strings into one owned allocation. Rust owns the callback context
+as a Box and drops it after joining, including failed startup. Queue allocation,
+password wiping, generation guards and the allocation-free stop flag retain
+their existing ownership and thread boundaries. Rust updates each live dialog
+directly and derives the selected-call view on reads. Condition notifications
+replace periodic result checks without abandoning delayed native operations.
+
 `bun run test:network-roam` also builds the standalone `call_actions_test` target.
 It includes the production queue handler and uses real libre ringtone ownership;
 only `ua_answer` failure/success and external inventory/network effects are

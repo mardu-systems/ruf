@@ -145,7 +145,10 @@ fn trusted_tls_contact_ip_keeps_identity_and_other_hostname_cannot_borrow_connec
         !s.calls[0].local_held && !s.calls[0].hold_pending
     });
     engine.hangup_call(&id).unwrap();
-    wait(&engine, |s| s.call == CallState::Idle);
+    // Local teardown can precede the remote TLS peer's packet observation.
+    wait(&engine, |s| {
+        s.call == CallState::Idle && peer.packets().contains("BYE ")
+    });
     assert!(peer.packets().contains("DNS 1"));
     assert!(peer.packets().contains("ACK "));
     assert!(peer.packets().contains("BYE "));

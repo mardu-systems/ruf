@@ -31,6 +31,16 @@ callbacks update a separate snapshot mutex. Events and polling project real stat
 into the frontend. Browser preview explicitly reports the absent desktop runtime;
 its regression fixtures provide synthetic IPC only.
 
+Each live dialog has one authoritative `CallSnapshot`. Native events update that
+dialog directly, independently of selection. Selected-call compatibility fields
+are derived only when reading a snapshot. A queued outgoing attempt reserves its
+token before native allocation; completed-call events remain available after the
+last dialog closes. Account/audio completion waits use a condition variable on
+the same state mutex, including rejection and shutdown; no delayed native request
+is abandoned. The private [native adapter ABI](api/native-adapter.md) uses one
+named request copied into one native allocation. Its numeric codes are shared
+with Rust through build-time generation; no native pointer enters public state.
+
 Native support is opt-in through Cargo feature `native`. Portable builds reject
 engine startup and report `notLinked`. Native builds link pinned static baresip,
 libre and OpenSSL plus selected modules. `linked` describes compilation only.
@@ -40,8 +50,8 @@ with one audible conversation. Passwords enter through native authentication set
 URIs or disk config. C code runs account/call operations on its event-loop thread.
 Shutdown flags the loop and joins it before destroying callback ownership.
 
-Audio remains within baresip: AudioUnit on macOS, WASAPI on Windows, or tone/file
-modules for the automated RTP echo test. Device routing and native ringing use
+Audio remains within baresip: CoreAudio on macOS, WASAPI on Windows, PulseAudio/pipewire-pulse on
+Linux, or tone/file modules for the automated RTP echo test. Device routing and native ringing use
 that same pipeline. The native event loop handles interface changes and SIP/UDP
 NAT mapping; this does not certify arbitrary public-network/provider compatibility.
 See [native build details](../native/README.md).
@@ -51,15 +61,21 @@ The desktop stores password-free account/settings metadata in schema-v2
 Preferences include login presentation, notification privacy, contact display and
 history collection/retention. Disabled accounts retain keys/selection and restore
 without password access or native user-agent creation. Passwords use OS credential
-storage, with explicit foreground recovery after access failure and no plaintext fallback. Call facts queue to a single SQLite
+storage (macOS Keychain, Windows Credential Manager or encrypted Linux Secret
+Service), with explicit foreground recovery after access failure and no plaintext fallback. Call facts queue to a single SQLite
 history worker without disk I/O under native call locks. The same ordered worker
 latches history collection at call start and prunes completed rows on policy
 changes, startup and daily intervals. Authorized macOS Contacts
 data remains an in-memory projection; contact names are not copied into call
 history. Favorites store only contact identifiers. Contacts integration is not
-available on Windows. Contracts and recovery behavior are documented in
+available on Windows or Linux. Contracts and recovery behavior are documented in
 [contacts](api/contacts.md), [history](api/history.md) and
 [credential recovery](api/credential-recovery.md).
+
+Per-account BLF uses the existing native SIP event socket, transport, account
+identity and bounded callback ownership. The frontend receives only validated
+unknown/idle/ringing/busy projections, never raw dialog XML or a SIP connection.
+See the [BLF contract](api/blf.md).
 
 The native process owns startup restoration, tray actions, background ringing and
 notification observation independently of webview visibility. A single-instance

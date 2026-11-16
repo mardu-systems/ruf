@@ -13,6 +13,7 @@
     error = null,
     requestLabel = message("settings.request_access"),
     unsupportedLabel = message("settings.unavailable"),
+    authorizedLabel = message("settings.permission_allowed"),
     allowUnsupportedSettings = false,
     oncheck,
     onrequest,
@@ -26,6 +27,7 @@
     error?: MessageValue | null;
     requestLabel?: MessageValue;
     unsupportedLabel?: MessageValue;
+    authorizedLabel?: MessageValue;
     allowUnsupportedSettings?: boolean;
     oncheck: () => void;
     onrequest?: (() => void) | undefined;
@@ -41,6 +43,7 @@
     if (checking) return message("settings.permission_checking");
     if (error) return message("settings.permission_check_failed");
     if (status === "unsupported") return unsupportedLabel;
+    if (status === "authorized") return authorizedLabel;
     return status ? labels[status] : message("settings.permission_unchecked");
   });
 </script>

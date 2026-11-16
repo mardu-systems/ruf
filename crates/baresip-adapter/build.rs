@@ -1,6 +1,28 @@
 //! Compile platform contacts independently of the opt-in native SIP engine.
 
 fn main() {
+    println!("cargo:rerun-if-changed=native/protocol.def");
+    println!("cargo:rerun-if-changed=native/bridge.h");
+    let codes = std::fs::read_to_string("native/protocol.def").expect("private ABI codes");
+    let mut rust = String::new();
+    for line in codes
+        .lines()
+        .filter_map(|line| line.strip_prefix("SIP_CODE("))
+    {
+        let (name, value) = line
+            .strip_suffix(')')
+            .expect("ABI code terminator")
+            .split_once(',')
+            .expect("ABI name and value");
+        let value: i32 = value.trim().parse().expect("numeric ABI code");
+        rust.push_str(&format!("pub(crate) const {name}: i32 = {value};\n"));
+    }
+    std::fs::write(
+        std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output"))
+            .join("protocol.rs"),
+        rust,
+    )
+    .expect("generated private ABI codes");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rerun-if-changed=native/contacts.m");
         println!("cargo:rerun-if-changed=native/contacts.h");
@@ -100,6 +122,7 @@ fn build_telephony() {
         ("reReliability", "re-reliability.patch"),
         ("baresipReliability", "baresip-reliability.patch"),
         ("baresipWasapi", "baresip-wasapi.patch"),
+        ("baresipPulse", "baresip-pulse.patch"),
     ] {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../native/patches")
@@ -147,6 +170,22 @@ fn build_telephony() {
             .define("WIN32", None)
             .define("_CRT_SECURE_NO_WARNINGS", None);
     }
+    if target.contains("linux") {
+        assert!(
+            manifest["modules"]
+                .as_array()
+                .is_some_and(|modules| modules.iter().any(|module| module == "pulse")),
+            "Linux SDK needs pulse; run bun run native:build"
+        );
+        let pulse = pkg_config::Config::new()
+            .cargo_metadata(false)
+            .probe("libpulse")
+            .expect("Linux audio requires libpulse-dev");
+        bridge
+            .file("native/audio_devices_linux.c")
+            .includes(pulse.include_paths);
+        println!("cargo:rerun-if-changed=native/audio_devices_linux.c");
+    }
     if std::env::var_os("CARGO_FEATURE_NATIVE_TEST_HOOKS").is_some() {
         bridge.define("SIP_NATIVE_TEST_HOOKS", None);
     }
@@ -157,6 +196,11 @@ fn build_telephony() {
     );
     for library in ["baresip", "re", "ssl", "crypto"] {
         println!("cargo:rustc-link-lib=static={library}");
+    }
+    if target.contains("linux") {
+        pkg_config::Config::new()
+            .probe("libpulse")
+            .expect("Linux audio requires libpulse-dev");
     }
     if target.contains("apple") {
         for framework in [

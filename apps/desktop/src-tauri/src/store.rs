@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io::Write, path::PathBuf};
 use tauri::Manager;
 
+#[cfg(target_os = "linux")]
+mod linux;
+
 /// Use this bundle's own application-data directory without importing old SIP data.
 pub(crate) fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, PhoneError> {
     app.path().app_data_dir().map_err(|_| storage_error())
@@ -241,12 +244,21 @@ pub(crate) trait CredentialStore: Send + Sync {
 pub(crate) struct SystemCredentials;
 impl CredentialStore for SystemCredentials {
     fn read(&self, key: &str, interactive: bool) -> Result<String, PhoneError> {
+        #[cfg(target_os = "linux")]
+        return credential_operation(interactive, || linux::read(key, interactive));
+        #[cfg(not(target_os = "linux"))]
         credential_operation(interactive, || read_password(key))
     }
     fn write(&self, key: &str, password: &str) -> Result<(), PhoneError> {
+        #[cfg(target_os = "linux")]
+        return credential_operation(true, || linux::write(key, password));
+        #[cfg(not(target_os = "linux"))]
         credential_operation(true, || write_password(key, password))
     }
     fn delete(&self, key: &str) -> Result<(), PhoneError> {
+        #[cfg(target_os = "linux")]
+        return credential_operation(false, || linux::delete(key));
+        #[cfg(not(target_os = "linux"))]
         credential_operation(false, || delete_password(key))
     }
 }
@@ -287,6 +299,7 @@ fn credential_operation<T>(
 fn entry(key: &str) -> Result<keyring::Entry, PhoneError> {
     keyring::Entry::new("org.rufapp.desktop", key).map_err(keyring_error)
 }
+#[cfg(not(target_os = "linux"))]
 fn read_password(key: &str) -> Result<String, PhoneError> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
@@ -298,6 +311,7 @@ fn read_password(key: &str) -> Result<String, PhoneError> {
         Err(credential_failure())
     }
 }
+#[cfg(not(target_os = "linux"))]
 fn write_password(key: &str, password: &str) -> Result<(), PhoneError> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
@@ -309,6 +323,7 @@ fn write_password(key: &str, password: &str) -> Result<(), PhoneError> {
         Err(credential_failure())
     }
 }
+#[cfg(not(target_os = "linux"))]
 fn delete_password(key: &str) -> Result<(), PhoneError> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
@@ -639,9 +654,14 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         );
-        write_password(&key, "synthetic-keychain-test").unwrap();
-        assert_eq!(read_password(&key).unwrap(), "synthetic-keychain-test");
-        delete_password(&key).unwrap();
-        assert!(read_password(&key).is_err());
+        SystemCredentials
+            .write(&key, "synthetic-keychain-test")
+            .unwrap();
+        assert_eq!(
+            SystemCredentials.read(&key, false).unwrap(),
+            "synthetic-keychain-test"
+        );
+        SystemCredentials.delete(&key).unwrap();
+        assert!(SystemCredentials.read(&key, false).is_err());
     }
 }

@@ -17,13 +17,18 @@ Use [development commands](development.md) and [CI/release behavior](ci-cd.md).
   and sanitized diagnostic regressions, plus browser state/layout regressions.
 - On macOS run contact/notification timeout regressions. Build the native DMG and
   verify its signed microphone and contacts permissions. Build the Windows NSIS
-  installer in its platform job.
-- Keep root/frontend/Cargo versions in sync, update the user-facing CHANGELOG.md
-  and add `docs/releases/<version>.md`. Tag exactly `v<version>` after review.
-- Observe the actual hosted quality, macOS, Windows and Asterisk jobs before
+  installer in its platform job. Build both Linux CPUs and all DEB/RPM/AppImage
+  formats; verify launchers, icon aliases, native dependencies and startup.
+  Keep the experimental Windows ARM64 CI artifact outside release-draft selection.
+- Keep root/frontend/Cargo versions in sync, move the matching unreleased notes
+  into both `CHANGELOG.md` and `CHANGELOG.de.md`, and add
+  `docs/releases/<version>.md`. Keep historical tagged notes bound to their original
+  assets. Tag exactly `v<version>` after review; a source change is not a release.
+- Observe the actual hosted quality, Linux, macOS, Windows and Asterisk jobs before
   treating their artifacts as verified. The tag workflow waits for all of them.
-- Download both installers and SHA256SUMS from the resulting draft and verify
-  their hashes. Inspect contents and bundled licenses before publishing a preview.
+- Download every selected installer, its SBOM/build manifest and SHA256SUMS from
+  the resulting draft and verify their hashes. A green three-target PR run does
+  not replace the full six-target release workflow. Inspect contents and bundled licenses before publishing a preview.
 
 ## Public production distribution blockers
 
@@ -44,10 +49,12 @@ Use [development commands](development.md) and [CI/release behavior](ci-cd.md).
 - Verify native microphone/speaker test bounds, selected outputs, navigation cleanup
   and real incoming-call preemption on hardware; inspect all three ringtones and
   zero/full ringtone volume. Meter success alone does not establish usable media.
-- Qualify installed macOS and Windows behavior: first-run permissions, credential
+- Qualify installed macOS, Windows and Linux behavior: first-run permissions, credential
   recovery, upgrade/restart, silent login, second launch, hide/reopen, tray/quit,
   denied notifications and actual notification clicks. Test real microphones,
   speakers/headsets and incoming/outgoing audio through supported PBXs/networks.
+  For Linux, record distro, desktop/session, credential provider and PulseAudio or
+  pipewire-pulse; include physical device unplug/replug and routing afterward.
 - Document the preview's isolated-test-network boundary. UDP/TCP signaling and
   ordinary RTP remain unencrypted. Verified TLS and required SDES-SRTP with TLS
   are implemented without plaintext fallback; qualify them against the actual

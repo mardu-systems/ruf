@@ -34,14 +34,24 @@ See [localization contracts](api/localization.md) and the locale-specific
 On macOS install Xcode/Command Line Tools. On Windows install MSVC C++ Build Tools,
 the Windows SDK and WebView2 as described in the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
-Current release targets are macOS 14+ arm64 and Windows 11 x64. Windows hosted
+Release build targets include macOS 14+ ARM64/Intel, Linux GNU x64/ARM64 and
+Windows 11 x64. See the [platform and package matrix](platforms.md). Windows hosted
 builds use Windows Server 2022; that is a build environment, not a runtime test
-on Windows 11. Intel macOS, ARM Windows and Linux are not release targets yet.
+on Windows 11. Windows ARM64 has an additional native CI build on Windows 11 ARM;
+its installer is experimental and requires hardware audio/SIP acceptance.
+Linux x64 and ARM64 have experimental DEB/RPM/AppImage
+builds; see [Linux setup, limitations and acceptance](linux.md).
+
+On a Windows ARM64 host with ARM64 Bun and Rust, run `bun run native:build`, then
+`bun run desktop:build --target aarch64-pc-windows-msvc --bundles nsis --features native`.
+The SDK and desktop target must match; this does not cross-compile an x64 SDK.
 
 `bun run native:build` builds the pinned SDK; `bun run dev:native` starts a
 real native phone. See [native prerequisites](../native/README.md) and the
 [Asterisk lab](../tests/interop/asterisk/README.md). `bun run dev` starts Tauri and a loopback-only Vite server. `bun run dev:web` is
 for layout work only. Native API access is unavailable in that browser mode.
+The [unreleased notes](releases/unreleased.md) distinguish current source from
+the published 0.1.1 installers.
 
 Before a change is complete:
 
@@ -64,7 +74,7 @@ Bun formatter and `cargo fmt` for source and
 documentation. The `desktop:build` wrapper always supplies a concrete Rust target
 (defaulting to the host), so release bundles are under
 `target/<triple>/release/bundle`. The macOS examples below use the supported
-Apple Silicon target, `aarch64-apple-darwin`.
+native macOS target (`aarch64-apple-darwin` or `x86_64-apple-darwin`).
 
 If macOS packaging reports that `rust-objcopy` cannot load `libLLVM.dylib`, first
 check the helper in the pinned Rustup toolchain. A local 1.98.1 installation had
@@ -89,14 +99,17 @@ For native changes, also run workspace Clippy/tests with
 `bun run desktop:build --features native`. Test-tone mode needs no audio
 hardware; microphone/speaker and Windows runtime require separate platform tests.
 
-`bun run test:native` builds the native workspace tests once, then runs NAT,
-SIP-event and remaining workspace tests in three separate processes. The native
-engine stays a singleton within each process; the full test selection, integration
-tests, doc tests and opt-in policy remain unchanged. Each process retains its
-exit status and logs, and any failure fails the command. On a headless Linux
-host, `bun run test:native --adapter` selects only `baresip-adapter`, matching the
-interop job without requiring Tauri system libraries. The separate Asterisk
-command still runs the opt-in SIP/audio/security scenarios.
+`bun run test:native` compiles the selected native suite once and reads executable
+paths from Cargo JSON. It runs the compiled tests from their package directories,
+with at most six processes: individual NAT/timeout cases, a serial ordinary SIP
+group and the remaining workspace/integration executables. Cargo doc tests run
+after all executables exit. Failures retain streamed per-process logs and fail
+the command; no concurrent Cargo rebuild can replace a partition's binary.
+Ignored tests keep their existing opt-in policy. On a headless Linux host,
+`bun run test:native --adapter` selects only `baresip-adapter`, without Tauri
+system libraries. `bun run test:asterisk` separately runs the complete opt-in
+SIP/audio/security lab. See the [runner contract](api/tooling.md) and
+[current CI evidence](verification/2026-11-16-ci-platform-fixes.md).
 
 macOS bundles require both `NSMicrophoneUsageDescription` in `Info.plist` and
 the `com.apple.security.device.audio-input` hardened-runtime entitlement in
@@ -241,9 +254,10 @@ loop rechecks mutations for incoming-call races. Saves wait for application of
 the queued native configuration, then poll for registration success.
 
 `accounts.json` under the Tauri application-data directory stores nonsecret
-metadata and selected account. Passwords use macOS Keychain Services / Windows
-Credential Manager through keyring. No plaintext fallback or browser password
-storage exists. Obsolete credential deletion is journaled and retried after
+metadata and selected account, including optional per-account BLF targets.
+Passwords use macOS Keychain Services / Windows Credential Manager through
+keyring, or encrypted Linux Secret Service through the existing desktop store. No
+plaintext fallback or browser password storage exists. Obsolete credential deletion is journaled and retried after
 access failures. See the [API contract](api/README.md) for schema/error details.
 The actual engine-wide audio mode is returned in snapshots, so webview reloads
 and new windows do not infer it from local form defaults.

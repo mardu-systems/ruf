@@ -3,8 +3,8 @@
 use crate::engine::EngineState;
 use phone_core::{
     AccountConfig, AudioDevice, AudioDevices, AudioMode, AudioTestKind, AudioTestSnapshot,
-    CallDirection, CallEvent, CallEventKind, CallState, CallerIdentity, EngineSnapshot, ErrorCode,
-    PhoneError, RegistrationState, SoundSettings,
+    CallDirection, CallEvent, CallEventKind, CallState, CallerIdentity, ErrorCode, PhoneError,
+    RegistrationState, SoundSettings,
 };
 use std::{
     ffi::{CStr, CString, c_void},
@@ -12,7 +12,7 @@ use std::{
     path::PathBuf,
     ptr::NonNull,
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -21,29 +21,8 @@ use std::{
 
 static ENGINE_LEASE: AtomicBool = AtomicBool::new(false);
 
-const EV_PROGRESS: i32 = 27;
-const EV_HOLD: i32 = 28;
-const EV_RESUME: i32 = 29;
-const EV_DTMF_START: i32 = 30;
-const EV_DTMF_END: i32 = 31;
-const EV_TRANSFER_FAILED: i32 = 32;
-const EV_REDIRECT: i32 = 33;
-const EV_ANSWER_CLOSED: i32 = 34;
-const EV_SELECTED: i32 = 39;
-const EV_MUTED: i32 = 40;
-const EV_LOCAL_HOLD_PENDING: i32 = 41;
-const EV_LOCAL_HOLD_DONE: i32 = 42;
-const EV_CONTROL_FAILED: i32 = 43;
-const EV_TRANSFER_PENDING: i32 = 44;
-const EV_TRANSFER_RESULT: i32 = 45;
-const EV_CONTROL_REJECTED: i32 = 46;
-const EV_RECOVERY_FAILED: i32 = 47;
-const EV_RECOVERING: i32 = 48;
-const EV_CONSULT_FAILED: i32 = 49;
-const EV_CALL_ERROR: i32 = 50;
-const EV_SECURITY: i32 = 51;
-const EV_BLF_NOTIFY: i32 = 52;
-const EV_BLF_UNKNOWN: i32 = 53;
+use crate::protocol::*;
+
 const SECURITY_CERTIFICATE: i32 = 20001;
 const SECURITY_TRANSPORT: i32 = 20002;
 const SECURITY_MEDIA: i32 = 20003;
@@ -60,6 +39,31 @@ struct NativeEvent {
     caller_name: *const std::ffi::c_char,
     caller_number: *const std::ffi::c_char,
     detail: *const std::ffi::c_char,
+}
+
+// Mirrored by bridge.h. Strings stay borrowed until submit returns.
+#[repr(C)]
+#[derive(Default)]
+struct NativeRequest {
+    operation: i32,
+    account_id: u32,
+    call_generation: u64,
+    transport: i32,
+    media_security: i32,
+    enabled: i32,
+    ringtone_variant: i32,
+    ringtone_volume: u32,
+    registrar: *const std::ffi::c_char,
+    username: *const std::ffi::c_char,
+    password: *const std::ffi::c_char,
+    auth_username: *const std::ffi::c_char,
+    outbound_proxy: *const std::ffi::c_char,
+    monitored_extensions: *const std::ffi::c_char,
+    destination: *const std::ffi::c_char,
+    device: *const std::ffi::c_char,
+    input_device: *const std::ffi::c_char,
+    output_device: *const std::ffi::c_char,
+    ring_device: *const std::ffi::c_char,
 }
 
 unsafe extern "C" {
@@ -79,21 +83,7 @@ unsafe extern "C" {
     fn sip_engine_set_test_dns(handle: *mut c_void, ip: *const std::ffi::c_char, port: u16) -> i32;
     fn sip_engine_run(handle: *mut c_void) -> i32;
     fn sip_engine_reserve_call_generation(handle: *mut c_void) -> u64;
-    fn sip_engine_request(
-        handle: *mut c_void,
-        operation: i32,
-        account_id: u32,
-        call_generation: u64,
-        registrar: *const std::ffi::c_char,
-        username: *const std::ffi::c_char,
-        password: *const std::ffi::c_char,
-        destination: *const std::ffi::c_char,
-        transport: i32,
-        media_security: i32,
-        auth_username: *const std::ffi::c_char,
-        outbound_proxy: *const std::ffi::c_char,
-        monitored_extensions: *const std::ffi::c_char,
-    ) -> i32;
+    fn sip_engine_request(handle: *mut c_void, request: *const NativeRequest) -> i32;
     fn sip_audio_devices(
         callback: extern "C" fn(
             i32,
@@ -120,6 +110,7 @@ impl Handle {
 
 struct CallbackContext {
     snapshot: Arc<Mutex<EngineState>>,
+    changed: Arc<Condvar>,
     ready: mpsc::Sender<Result<(), PhoneError>>,
 }
 
@@ -183,6 +174,14 @@ extern "C" fn blf_callback(event: *const NativeEvent, arg: *mut c_void) -> i32 {
     .unwrap_or(1)
 }
 
+// Notify after the state guard is released, including early returns and caught unwinding.
+struct NotifyOnDrop<'a>(&'a Condvar);
+impl Drop for NotifyOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.notify_all();
+    }
+}
+
 extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
     // arg points to the owned box held until the engine thread has joined.
     let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -199,7 +198,8 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             detail,
         } = unsafe { *event };
         let context = unsafe { &*arg.cast::<CallbackContext>() };
-        if kind == 1 {
+        let _notify = NotifyOnDrop(&context.changed);
+        if kind == EV_READY {
             let _ = context.ready.send(if code == 0 {
                 Ok(())
             } else {
@@ -208,10 +208,11 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             return;
         }
         if let Ok(mut engine) = context.snapshot.lock() {
-            if (35..=38).contains(&kind) {
+            let engine = &mut *engine;
+            if (EV_TEST_STARTED..=EV_TEST_FAILED).contains(&kind) {
                 let id = call_generation.to_string();
                 match kind {
-                    35 => {
+                    EV_TEST_STARTED => {
                         engine.snapshot.audio_test = Some(AudioTestSnapshot {
                             id,
                             kind: if account_id == 0 {
@@ -222,7 +223,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             level: 0.0,
                         })
                     }
-                    36 => {
+                    EV_TEST_LEVEL => {
                         if let Some(test) = engine
                             .snapshot
                             .audio_test
@@ -232,7 +233,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             test.level = (code.clamp(0, 1000) as f32) / 1000.0;
                         }
                     }
-                    37 => {
+                    EV_TEST_STOPPED => {
                         if engine
                             .snapshot
                             .audio_test
@@ -242,7 +243,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             engine.snapshot.audio_test = None;
                         }
                     }
-                    38 => engine.snapshot.audio_test_error = Some(native_error(code)),
+                    EV_TEST_FAILED => engine.snapshot.audio_test_error = Some(native_error(code)),
                     _ => {}
                 }
                 return;
@@ -253,15 +254,15 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                 }) {
                     call.security = phone_core::CallSecurity {
                         signaling_transport: match code & 3 {
-                            1 => Some(phone_core::SipTransport::Udp),
-                            2 => Some(phone_core::SipTransport::Tcp),
-                            3 => Some(phone_core::SipTransport::Tls),
+                            EV_READY => Some(phone_core::SipTransport::Udp),
+                            EV_REGISTERING => Some(phone_core::SipTransport::Tcp),
+                            EV_REGISTERED => Some(phone_core::SipTransport::Tls),
                             _ => None,
                         },
                         tls_peer_verified: code & 4 != 0,
                         media: match (code >> 3) & 3 {
-                            1 => phone_core::MediaProtection::Unprotected,
-                            2 => phone_core::MediaProtection::SdesSrtp,
+                            EV_READY => phone_core::MediaProtection::Unprotected,
+                            EV_REGISTERING => phone_core::MediaProtection::SdesSrtp,
                             _ => phone_core::MediaProtection::Unknown,
                         },
                     };
@@ -273,7 +274,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                 .calls
                 .iter()
                 .any(|call| call.id == call_generation.to_string());
-            if kind == 10 && !owns_dialog {
+            if kind == EV_ERROR && !owns_dialog {
                 let error = native_error(code);
                 engine.engine_error = Some(error.clone());
                 engine.snapshot.last_error = Some(error);
@@ -284,7 +285,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             }
             // Journal events run synchronously before any UI snapshot projection.
             match kind {
-                7 | 22 | 23 => {
+                EV_INCOMING | EV_BUSY_INCOMING | EV_DIAL_STARTED => {
                     // Public metadata is optimistic while an update is queued.
                     // Offers still belong to the existing native UA until its
                     // replacement is acknowledged; it may reject that update.
@@ -299,23 +300,23 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                     };
                     let number = owned_caller_text(caller_number, 80)
                         .filter(|value| caller_number_is_display_safe(value));
-                    let name = (kind != 23)
+                    let name = (kind != EV_DIAL_STARTED)
                         .then(|| owned_caller_text(caller_name, 128))
                         .flatten();
-                    if kind == 23 {
+                    if kind == EV_DIAL_STARTED {
                         engine.snapshot.last_call_failure = None;
-                    }
-                    if kind == 23
-                        && let Some(number) = &number
-                    {
-                        engine
-                            .call_destinations
-                            .insert(call_generation, number.clone());
+                        let mut call = crate::dialogs::new_dialog(
+                            call_generation,
+                            account_id,
+                            CallState::Calling,
+                        );
+                        call.destination = number.clone();
+                        engine.pending_dial = Some(call);
                     }
                     engine.call_journal.start(
                         call_generation,
                         account,
-                        if kind == 23 {
+                        if kind == EV_DIAL_STARTED {
                             CallDirection::Outgoing
                         } else {
                             CallDirection::Incoming
@@ -323,19 +324,25 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         number,
                         name,
                     );
-                    if kind == 22 {
+                    if kind == EV_BUSY_INCOMING {
                         engine.call_journal.busy(call_generation);
                     }
                 }
-                8 => engine.call_journal.connected(call_generation),
-                9 => engine.call_journal.finish(call_generation, code, false),
-                24 | EV_ANSWER_CLOSED => engine.call_journal.finish(call_generation, code, true),
-                25 => engine.call_journal.local_end(call_generation),
-                11 | 26 => engine.call_journal.interrupt(),
+                EV_ACTIVE => engine.call_journal.connected(call_generation),
+                EV_CLOSED => engine.call_journal.finish(call_generation, code, false),
+                EV_DIAL_FAILED | EV_ANSWER_CLOSED => {
+                    engine.call_journal.finish(call_generation, code, true)
+                }
+                EV_LOCAL_END => engine.call_journal.local_end(call_generation),
+                EV_STOPPED | EV_INTERRUPTING => engine.call_journal.interrupt(),
                 _ => {}
             }
-            if kind == 24
-                && engine.call_destinations.remove(&call_generation).is_some()
+            if kind == EV_DIAL_FAILED
+                && (owns_dialog
+                    || engine
+                        .pending_dial
+                        .as_ref()
+                        .is_some_and(|call| call.id == call_generation.to_string()))
                 && code != 0
             {
                 engine.snapshot.last_call_failure = Some(phone_core::CallFailure {
@@ -344,10 +351,10 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                     error: native_error(code),
                 });
             }
-            if kind == 25 {
+            if kind == EV_LOCAL_END {
                 engine.local_endings.insert(call_generation);
             }
-            if kind == 26 {
+            if kind == EV_INTERRUPTING {
                 let generations: Vec<u64> = engine
                     .snapshot
                     .calls
@@ -356,14 +363,13 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                     .collect();
                 engine.local_endings.extend(generations);
             }
-            if kind == 26 || (kind == 25 && engine.call_generation == call_generation) {
-                engine.local_ending = true;
-            }
-            if kind == 22 || kind == 25 || kind == 26 {
+            if kind == EV_BUSY_INCOMING || kind == EV_LOCAL_END || kind == EV_INTERRUPTING {
                 return;
             }
-            if (matches!(kind, 6 | 8 | 9 | 21 | EV_ANSWER_CLOSED)
-                || (EV_PROGRESS..=EV_REDIRECT).contains(&kind))
+            if (matches!(
+                kind,
+                EV_RINGING | EV_ACTIVE | EV_CLOSED | EV_ANSWER_FAILED | EV_ANSWER_CLOSED
+            ) || (EV_PROGRESS..=EV_REDIRECT).contains(&kind))
                 && engine.call_generation != call_generation
                 && !engine
                     .snapshot
@@ -373,38 +379,33 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
             {
                 return;
             }
-            // Busy offers, unrelated registration callbacks and failed dial attempts
-            // must not replace the opaque token of a live call.
-            if matches!(kind, 5..=8)
-                || (kind == 23
-                    && matches!(engine.snapshot.call, CallState::Idle | CallState::Calling))
-            {
-                engine.call_generation = call_generation;
-            }
-            if kind == 23 {
+            if kind == EV_DIAL_STARTED {
+                if matches!(engine.call_state(), CallState::Idle | CallState::Calling) {
+                    engine.call_generation = call_generation;
+                }
                 return;
             }
-            if kind == 24
-                && engine.call_generation != call_generation
-                && !engine
-                    .snapshot
-                    .calls
-                    .iter()
-                    .any(|call| call.id == call_generation.to_string())
-            {
+            if kind == EV_DIAL_FAILED && engine.call_generation != call_generation && !owns_dialog {
+                if engine
+                    .pending_dial
+                    .as_ref()
+                    .is_some_and(|call| call.id == call_generation.to_string())
+                {
+                    engine.pending_dial = None;
+                }
                 return;
             }
-            if kind == 17 || kind == 18 {
-                engine.sound_result = Some(if kind == 17 {
+            if kind == EV_AUDIO_APPLIED || kind == EV_AUDIO_FAILED {
+                engine.sound_result = Some(if kind == EV_AUDIO_APPLIED {
                     Ok(())
                 } else {
                     Err(native_error(code))
                 });
                 return;
             }
-            if kind == 15 || kind == 16 {
+            if kind == EV_ACCOUNT_APPLIED || kind == EV_ACCOUNT_REJECTED {
                 let previous = engine.pending_accounts.remove(&account_id);
-                let result = if kind == 15 {
+                let result = if kind == EV_ACCOUNT_APPLIED {
                     if let Some(account) = engine
                         .snapshot
                         .accounts
@@ -438,14 +439,8 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                 engine.account_results.insert(account_id, result);
                 return;
             }
-            if kind == 11 {
+            if kind == EV_STOPPED {
                 engine.stopped = true;
-            }
-            let dialog_event = matches!(kind, 5..=10 | 21 | 24 | 27..=34 | EV_CALL_ERROR);
-            let previous_selection = engine.snapshot.call_id.clone();
-            if dialog_event {
-                engine.select_dialog(&call_generation.to_string());
-                engine.call_generation = call_generation;
             }
             if (EV_SELECTED..=EV_CONSULT_FAILED).contains(&kind) {
                 let id = call_generation.to_string();
@@ -485,28 +480,12 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         }
                         EV_CONTROL_FAILED => {
                             call.hold_pending = false;
-                            call.last_error = Some(
-                                u16::try_from(code)
-                                    .ok()
-                                    .and_then(PhoneError::from_sip_status)
-                                    .unwrap_or_else(|| {
-                                        PhoneError::new(
-                                            ErrorCode::NativeFailure,
-                                            "Call control failed or timed out.",
-                                        )
-                                    }),
-                            );
+                            call.last_error =
+                                Some(sip_error(code, "Call control failed or timed out."));
                         }
                         EV_CONSULT_FAILED => {
-                            let mut error = u16::try_from(code)
-                                .ok()
-                                .and_then(PhoneError::from_sip_status)
-                                .unwrap_or_else(|| {
-                                    PhoneError::new(
-                                        ErrorCode::NativeFailure,
-                                        "The consultation could not be started.",
-                                    )
-                                });
+                            let mut error =
+                                sip_error(code, "The consultation could not be started.");
                             error.message = format!(
                                 "Consultation failed: {} The original call is retained.",
                                 error.message
@@ -522,10 +501,7 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                         }
                         EV_RECOVERY_FAILED => {
                             call.hold_pending = false;
-                            let mut error = u16::try_from(code)
-                                .ok()
-                                .and_then(PhoneError::from_sip_status)
-                                .unwrap_or_else(|| PhoneError::new(ErrorCode::NativeFailure, ""));
+                            let mut error = sip_error(code, "");
                             error.message =
                                 "The SIP hold recovery failed; the uncertain call was ended."
                                     .into();
@@ -545,7 +521,10 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             } else {
                                 // A snapshot may be read before the following
                                 // legacy failure event; publish its error now.
-                                call.last_error = Some(transfer_error(code));
+                                call.last_error = Some(sip_error(
+                                    code,
+                                    "Call transfer failed without a SIP response.",
+                                ));
                                 phone_core::TransferState::Failed
                             };
                         }
@@ -577,67 +556,211 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                 if let Some(error) = terminal_failure {
                     engine.terminal_call_errors.insert(call_generation, error);
                 }
-                if engine.snapshot.call_id.as_deref() == Some(&id) {
-                    engine.select_dialog(&id);
+                if engine.call_generation == call_generation {
+                    engine.snapshot.last_error = None;
                 }
                 return;
             }
-            if kind == 5 || kind == 7 {
+            if kind == EV_CALLING || kind == EV_INCOMING {
                 engine.engine_error = None;
                 engine.snapshot.last_call_failure = None;
-                engine.remote_hold = false;
-                engine.local_ending = false;
-                engine.snapshot.call_events.clear();
-                engine.snapshot.call_events_dropped = 0;
-                engine.snapshot.call_connected_at_ms = None;
-                engine.snapshot.caller_contact = None;
-                engine.snapshot.last_error = None;
+                engine.start_dialog(
+                    call_generation,
+                    account_id,
+                    if kind == EV_CALLING {
+                        CallState::Calling
+                    } else {
+                        CallState::Incoming
+                    },
+                );
             }
-            if kind == EV_HOLD {
-                engine.remote_hold = true;
-            }
-            if kind == EV_RESUME {
-                engine.remote_hold = false;
-            }
-            let remote_hold = engine.remote_hold;
-            let local_ending = engine.local_ending;
             if kind == EV_CALL_ERROR {
                 engine
                     .terminal_call_errors
                     .insert(call_generation, native_error(code));
             }
-            let mut terminal_error = if matches!(kind, 9 | 24 | EV_ANSWER_CLOSED) {
-                engine.terminal_call_errors.remove(&call_generation)
-            } else {
-                None
-            };
-            if kind == 13 {
-                engine.blf_dialogs.retain(|(id, _), _| *id != account_id);
+            if matches!(kind, EV_CALLING..=EV_ERROR | EV_ANSWER_FAILED | EV_DIAL_FAILED | EV_PROGRESS..=EV_ANSWER_CLOSED | EV_CALL_ERROR)
+            {
+                engine.snapshot.last_error = None;
+                let id = call_generation.to_string();
+                let local_ending = engine.local_endings.contains(&call_generation);
+                let mut terminal_error =
+                    if matches!(kind, EV_CLOSED | EV_DIAL_FAILED | EV_ANSWER_CLOSED) {
+                        engine.terminal_call_errors.remove(&call_generation)
+                    } else {
+                        None
+                    };
+                let call = engine
+                    .snapshot
+                    .calls
+                    .iter_mut()
+                    .find(|call| call.id == id)
+                    .or_else(|| engine.pending_dial.as_mut().filter(|call| call.id == id));
+                if let Some(call) = call {
+                    match kind {
+                        EV_CALLING..=EV_ACTIVE => {
+                            call.state = match kind {
+                                EV_CALLING => CallState::Calling,
+                                6 if call.state == CallState::EarlyMedia => CallState::EarlyMedia,
+                                EV_RINGING => CallState::Ringing,
+                                EV_INCOMING => CallState::Incoming,
+                                _ if call.remote_held => CallState::Held,
+                                _ => CallState::Active,
+                            };
+                            if kind == EV_ACTIVE && call.connected_at_ms.is_none() {
+                                call.connected_at_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .ok()
+                                    .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+                            }
+                            if kind == EV_INCOMING {
+                                call.caller = Some(CallerIdentity {
+                                    name: owned_caller_text(caller_name, 128),
+                                    number: owned_caller_text(caller_number, 80)
+                                        .filter(|value| caller_number_is_display_safe(value)),
+                                });
+                            } else if kind == EV_CALLING {
+                                call.caller = None;
+                            }
+                        }
+                        EV_CLOSED | EV_DIAL_FAILED | EV_ANSWER_CLOSED => {
+                            let outgoing_setup = matches!(
+                                call.state,
+                                CallState::Calling | CallState::Ringing | CallState::EarlyMedia
+                            );
+                            let closing_error = if kind == EV_ANSWER_CLOSED && !local_ending {
+                                Some(PhoneError::new(
+                                    ErrorCode::NativeFailure,
+                                    "The incoming call ended before establishment after its answer was sent.",
+                                ))
+                            } else if kind == EV_DIAL_FAILED && code != 0 {
+                                Some(native_error(code))
+                            } else if !local_ending
+                                && let Ok(status) = u16::try_from(code)
+                                && let Some(error) = PhoneError::from_sip_status(status)
+                            {
+                                Some(error)
+                            } else if !local_ending && code >= 700 {
+                                Some(native_error(code))
+                            } else if !local_ending
+                                && code == 0
+                                && outgoing_setup
+                                && terminal_error.is_none()
+                            {
+                                Some(PhoneError::new(
+                                    ErrorCode::NativeFailure,
+                                    "The outgoing call ended before establishment without a final SIP response.",
+                                ))
+                            } else {
+                                None
+                            };
+                            if closing_error.is_some() {
+                                terminal_error = closing_error;
+                            }
+                            if let Some(error) = &terminal_error {
+                                call.last_error = Some(error.clone());
+                            }
+                        }
+                        EV_ERROR | EV_CALL_ERROR => call.last_error = Some(native_error(code)),
+                        EV_ANSWER_FAILED => {
+                            if call.state == CallState::Answering {
+                                call.state = CallState::Incoming;
+                            }
+                            call.last_error = Some(native_error(code));
+                        }
+                        EV_PROGRESS => {
+                            if matches!(
+                                call.state,
+                                CallState::Calling | CallState::Ringing | CallState::EarlyMedia
+                            ) {
+                                call.state = CallState::EarlyMedia;
+                            }
+                            record_call_event(call, CallEventKind::Progress);
+                        }
+                        EV_HOLD | EV_RESUME => {
+                            call.remote_held = kind == EV_HOLD;
+                            if matches!(call.state, CallState::Active | CallState::Held) {
+                                call.state = if call.remote_held {
+                                    CallState::Held
+                                } else {
+                                    CallState::Active
+                                };
+                            }
+                            record_call_event(
+                                call,
+                                if call.remote_held {
+                                    CallEventKind::Held
+                                } else {
+                                    CallEventKind::Resumed
+                                },
+                            );
+                        }
+                        EV_DTMF_START => {
+                            if !detail.is_null() {
+                                // The borrowed native digit buffer contains two bytes including NUL.
+                                let digit = unsafe { CStr::from_ptr(detail) }.to_bytes();
+                                if digit.len() == 1 && b"0123456789*#ABCD".contains(&digit[0]) {
+                                    record_call_event(
+                                        call,
+                                        CallEventKind::DtmfStart {
+                                            digit: char::from(digit[0]).to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        EV_DTMF_END => record_call_event(call, CallEventKind::DtmfEnd),
+                        EV_TRANSFER_FAILED => {
+                            record_call_event(call, CallEventKind::TransferFailed);
+                            call.last_error = Some(sip_error(
+                                code,
+                                "Call transfer failed without a SIP response.",
+                            ));
+                        }
+                        EV_REDIRECT => {
+                            if let Ok(status @ 300..=399) = u16::try_from(code) {
+                                record_call_event(
+                                    call,
+                                    CallEventKind::Redirected { sip_status: status },
+                                );
+                                call.last_error = PhoneError::from_sip_status(status);
+                            }
+                        }
+                        _ => {}
+                    }
+                    if let Some(error) = terminal_error {
+                        engine.snapshot.last_call_failure = Some(phone_core::CallFailure {
+                            call_id: id,
+                            account_id: call.account_id,
+                            error,
+                        });
+                    }
+                }
+                if matches!(kind, EV_CLOSED | EV_DIAL_FAILED | EV_ANSWER_CLOSED) {
+                    engine.close_dialog(call_generation);
+                }
+                return;
             }
-            if kind == 11 {
-                engine.blf_dialogs.clear();
-            }
-            let closing_owner = engine.snapshot.call_account_id.unwrap_or(account_id);
-            let state = &mut engine.snapshot;
             match kind {
-                2..=4 => {
-                    if let Some(account) = state
+                EV_REGISTERING..=EV_REG_FAILED => {
+                    if let Some(account) = engine
+                        .snapshot
                         .accounts
                         .iter_mut()
                         .find(|a| a.id == account_id && a.enabled)
                     {
-                        if kind == 3 {
+                        if kind == EV_REGISTERED {
                             account.registered_at_ms = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .ok()
                                 .and_then(|duration| u64::try_from(duration.as_millis()).ok());
                         }
                         account.registration = match kind {
-                            2 => RegistrationState::Registering,
-                            3 => RegistrationState::Registered,
+                            EV_REGISTERING => RegistrationState::Registering,
+                            EV_REGISTERED => RegistrationState::Registered,
                             _ => RegistrationState::Failed,
                         };
-                        account.last_error = (kind == 4).then(|| {
+                        account.last_error = (kind == EV_REG_FAILED).then(|| {
                             if let Ok(status) = u16::try_from(code)
                                 && let Some(error) = PhoneError::from_sip_status(status)
                             {
@@ -653,209 +776,70 @@ extern "C" fn callback(event: *const NativeEvent, arg: *mut c_void) {
                             }
                         });
                     }
-                    state.sync_selected_registration();
+                    engine.snapshot.sync_selected_registration();
                 }
-                5..=8 => {
-                    state.call = match kind {
-                        5 => CallState::Calling,
-                        6 if state.call == CallState::EarlyMedia => CallState::EarlyMedia,
-                        6 => CallState::Ringing,
-                        7 => CallState::Incoming,
-                        _ if remote_hold => CallState::Held,
-                        _ => CallState::Active,
-                    };
-                    if kind == 8 && state.call_connected_at_ms.is_none() {
-                        state.call_connected_at_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .ok()
-                            .and_then(|duration| u64::try_from(duration.as_millis()).ok());
-                    }
-                    if kind == 7 {
-                        state.caller = Some(CallerIdentity {
-                            name: owned_caller_text(caller_name, 128),
-                            number: owned_caller_text(caller_number, 80)
-                                .filter(|value| caller_number_is_display_safe(value)),
-                        });
-                    } else if kind == 5 {
-                        state.caller = None;
-                    }
-                    state.call_account_id = Some(account_id);
-                    state.call_id = Some(call_generation.to_string());
-                }
-                9 | 24 | EV_ANSWER_CLOSED => {
-                    let outgoing_setup = matches!(
-                        state.call,
-                        CallState::Calling | CallState::Ringing | CallState::EarlyMedia
-                    );
-                    state.call = CallState::Idle;
-                    state.call_account_id = None;
-                    state.call_id = None;
-                    state.caller = None;
-                    state.caller_contact = None;
-                    state.call_connected_at_ms = None;
-                    let closing_error = if kind == EV_ANSWER_CLOSED && !local_ending {
-                        Some(PhoneError::new(
-                            ErrorCode::NativeFailure,
-                            "The incoming call ended before establishment after its answer was sent.",
-                        ))
-                    } else if kind == 24 && code != 0 {
-                        Some(native_error(code))
-                    } else if !local_ending
-                        && let Ok(status) = u16::try_from(code)
-                        && let Some(error) = PhoneError::from_sip_status(status)
-                    {
-                        Some(error)
-                    } else if !local_ending && code >= 700 {
-                        Some(native_error(code))
-                    } else if !local_ending
-                        && code == 0
-                        && outgoing_setup
-                        && terminal_error.is_none()
-                    {
-                        Some(PhoneError::new(
-                            ErrorCode::NativeFailure,
-                            "The outgoing call ended before establishment without a final SIP response.",
-                        ))
-                    } else {
-                        None
-                    };
-                    if closing_error.is_some() {
-                        terminal_error = closing_error;
-                    }
-                    if let Some(error) = &terminal_error {
-                        state.last_error = Some(error.clone());
-                    }
-                }
-                10 | EV_CALL_ERROR => state.last_error = Some(native_error(code)),
-                21 => {
-                    if state.call == CallState::Answering {
-                        state.call = CallState::Incoming;
-                    }
-                    state.last_error = Some(native_error(code));
-                }
-                11 => {
-                    state.audio_test = None;
-                    state.ringtone_playing = false;
-                    state.registration = RegistrationState::Unconfigured;
-                    state.call = CallState::Idle;
-                    state.call_account_id = None;
-                    state.call_id = None;
-                    state.caller = None;
-                    state.caller_contact = None;
-                    state.call_connected_at_ms = None;
-                    for account in &mut state.accounts {
+                EV_STOPPED => {
+                    engine.blf_dialogs.clear();
+                    engine.snapshot.calls.clear();
+                    engine.pending_dial = None;
+                    engine.snapshot.audio_test = None;
+                    engine.snapshot.ringtone_playing = false;
+                    engine.snapshot.registration = RegistrationState::Unconfigured;
+                    for account in &mut engine.snapshot.accounts {
                         account.registration = RegistrationState::Unconfigured;
                         for target in &mut account.monitored_extensions {
                             target.state = phone_core::ExtensionState::Unknown;
                         }
                     }
                     if code != 0 {
-                        state.last_error = Some(native_error(code));
+                        engine.snapshot.last_error = Some(native_error(code));
                     }
                 }
-                12 => {
-                    state.last_error = Some(PhoneError::new(
+                EV_STALE => {
+                    let error = PhoneError::new(
                         ErrorCode::InvalidState,
                         "The call changed before this action executed.",
-                    ))
+                    );
+                    engine.snapshot.last_error = Some(error);
                 }
-                13 => {
-                    state.accounts.retain(|a| a.id != account_id);
-                    if state.selected_account_id == Some(account_id) {
-                        state.selected_account_id = state.accounts.first().map(|a| a.id);
+
+                EV_REMOVED => {
+                    engine.blf_dialogs.retain(|(id, _), _| *id != account_id);
+                    engine.snapshot.accounts.retain(|a| a.id != account_id);
+                    if engine.snapshot.selected_account_id == Some(account_id) {
+                        engine.snapshot.selected_account_id =
+                            engine.snapshot.accounts.first().map(|a| a.id);
                     }
-                    state.sync_selected_registration();
+                    engine.snapshot.sync_selected_registration();
                 }
-                19 => state.ringtone_playing = true,
-                20 => state.ringtone_playing = false,
-                14 => {
-                    if let Some(account) = state.accounts.iter_mut().find(|a| a.id == account_id) {
+                EV_REMOVE_FAILED => {
+                    if let Some(account) = engine
+                        .snapshot
+                        .accounts
+                        .iter_mut()
+                        .find(|a| a.id == account_id)
+                    {
                         account.removing = false;
                     }
-                    state.last_error = Some(PhoneError::new(
+                    engine.snapshot.last_error = Some(PhoneError::new(
                         ErrorCode::Busy,
                         "An incoming call prevented account removal.",
                     ));
-                    state.sync_selected_registration();
+                    engine.snapshot.sync_selected_registration();
                 }
-                EV_PROGRESS => {
-                    if matches!(
-                        state.call,
-                        CallState::Calling | CallState::Ringing | CallState::EarlyMedia
-                    ) {
-                        state.call = CallState::EarlyMedia;
-                    }
-                    record_call_event(state, CallEventKind::Progress);
-                }
-                EV_HOLD | EV_RESUME => {
-                    if matches!(state.call, CallState::Active | CallState::Held) {
-                        state.call = if remote_hold {
-                            CallState::Held
-                        } else {
-                            CallState::Active
-                        };
-                    }
-                    record_call_event(
-                        state,
-                        if remote_hold {
-                            CallEventKind::Held
-                        } else {
-                            CallEventKind::Resumed
-                        },
-                    );
-                }
-                EV_DTMF_START => {
-                    if !detail.is_null() {
-                        // C supplies a NUL-terminated two-byte digit buffer for this event only.
-                        let digit = unsafe { CStr::from_ptr(detail) }.to_bytes();
-                        if digit.len() == 1 && b"0123456789*#ABCD".contains(&digit[0]) {
-                            record_call_event(
-                                state,
-                                CallEventKind::DtmfStart {
-                                    digit: char::from(digit[0]).to_string(),
-                                },
-                            );
-                        }
-                    }
-                }
-                EV_DTMF_END => record_call_event(state, CallEventKind::DtmfEnd),
-                EV_TRANSFER_FAILED => {
-                    record_call_event(state, CallEventKind::TransferFailed);
-                    state.last_error = Some(transfer_error(code));
-                }
-                EV_REDIRECT => {
-                    if let Ok(status @ 300..=399) = u16::try_from(code) {
-                        record_call_event(state, CallEventKind::Redirected { sip_status: status });
-                        state.last_error = PhoneError::from_sip_status(status);
-                    }
-                }
+                EV_RING_STARTED => engine.snapshot.ringtone_playing = true,
+                EV_RING_STOPPED => engine.snapshot.ringtone_playing = false,
                 _ => {}
-            }
-            if let Some(error) = terminal_error {
-                engine.snapshot.last_call_failure = Some(phone_core::CallFailure {
-                    call_id: call_generation.to_string(),
-                    account_id: closing_owner,
-                    error,
-                });
-            }
-            if dialog_event {
-                engine.finish_dialog_event(call_generation, previous_selection, kind);
-            }
-            if kind == 11 {
-                engine.snapshot.calls.clear();
             }
         }
     }));
 }
 
-fn record_call_event(state: &mut EngineSnapshot, event: CallEventKind) {
-    let Some(call_id) = state.call_id.clone() else {
-        return;
-    };
+fn record_call_event(call: &mut phone_core::CallSnapshot, event: CallEventKind) {
     push_call_event(
-        &mut state.call_events,
-        &mut state.call_events_dropped,
-        call_id,
+        &mut call.events,
+        &mut call.events_dropped,
+        call.id.clone(),
         event,
     );
 }
@@ -914,15 +898,12 @@ fn sanitize_caller_text(value: &str, limit: usize) -> Option<String> {
 pub(crate) struct NativeEngine {
     handle: Option<Handle>,
     thread: Option<JoinHandle<i32>>,
-    context: Option<NonNull<CallbackContext>>,
+    context: Option<Box<CallbackContext>>,
 }
-// Moving ownership does not change the boxed callback address. Public Engine
-// operations require exclusive access; the event loop accesses only synchronized state.
-unsafe impl Send for NativeEngine {}
-
 impl NativeEngine {
     pub(crate) fn start(
         snapshot: Arc<Mutex<EngineState>>,
+        changed: Arc<Condvar>,
         audio: AudioMode,
         recording: Option<PathBuf>,
         test_ca: Option<PathBuf>,
@@ -970,212 +951,184 @@ impl NativeEngine {
             ));
         }
         let (ready, receiver) = mpsc::channel();
-        let context = NonNull::new(Box::into_raw(Box::new(CallbackContext { snapshot, ready })))
-            .expect("Box is non-null");
+        let mut context = Box::new(CallbackContext {
+            snapshot,
+            changed,
+            ready,
+        });
         let raw = unsafe {
             sip_engine_create(
                 callback,
-                context.as_ptr().cast(),
+                (&mut *context as *mut CallbackContext).cast(),
                 i32::from(matches!(audio, AudioMode::TestTone)),
                 recording.as_ptr(),
             )
         };
         let Some(pointer) = NonNull::new(raw) else {
-            unsafe {
-                drop(Box::from_raw(context.as_ptr()));
-            }
             ENGINE_LEASE.store(false, Ordering::Release);
             return Err(native_error(-1));
+        };
+        let handle = Handle(pointer);
+        // From here, every failure uses the same joined shutdown and automatic Box drop.
+        let mut engine = Self {
+            handle: Some(handle),
+            thread: None,
+            context: Some(context),
         };
         unsafe {
             sip_engine_set_blf_callback(raw, blf_callback);
         }
         #[cfg(feature = "native-test-hooks")]
         if let Some(path) = test_ca {
-            let code = unsafe { sip_engine_set_test_ca(raw, path.as_ptr()) };
-            if code != 0 {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(code));
-            }
+            native_result(unsafe { sip_engine_set_test_ca(raw, path.as_ptr()) })?;
         }
         #[cfg(feature = "native-test-hooks")]
         if let Some((ip, port)) = test_dns {
-            let code = unsafe { sip_engine_set_test_dns(raw, ip.as_ptr(), port) };
-            if code != 0 {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(code));
-            }
+            native_result(unsafe { sip_engine_set_test_dns(raw, ip.as_ptr(), port) })?;
         }
         #[cfg(not(feature = "native-test-hooks"))]
         debug_assert!(test_ca.is_none() && test_dns.is_none());
-        let handle = Handle(pointer);
-        let thread = match thread::Builder::new()
-            .name("baresip-event-loop".into())
-            .spawn(move || handle.run())
-        {
-            Ok(thread) => thread,
-            Err(_) => {
-                unsafe {
-                    sip_engine_destroy(raw);
-                    drop(Box::from_raw(context.as_ptr()));
-                }
-                ENGINE_LEASE.store(false, Ordering::Release);
-                return Err(native_error(-1));
-            }
-        };
-        let engine = Self {
-            handle: Some(handle),
-            thread: Some(thread),
-            context: Some(context),
-        };
+        engine.thread = Some(
+            thread::Builder::new()
+                .name("baresip-event-loop".into())
+                .spawn(move || handle.run())
+                .map_err(|_| native_error(-1))?,
+        );
         receiver.recv().map_err(|_| native_error(-1))??;
         Ok(engine)
     }
 
     pub(crate) fn reserve_call_generation(&self) -> Result<u64, PhoneError> {
-        let handle = self
-            .handle
-            .ok_or_else(|| PhoneError::new(ErrorCode::EngineUnavailable, "Engine is stopped."))?;
         // The same native queue lock serializes reservations and incoming tokens.
-        Ok(unsafe { sip_engine_reserve_call_generation(handle.0.as_ptr()) })
+        Ok(unsafe { sip_engine_reserve_call_generation(self.handle()?) })
+    }
+
+    fn handle(&self) -> Result<*mut c_void, PhoneError> {
+        self.handle
+            .map(|handle| handle.0.as_ptr())
+            .ok_or_else(|| PhoneError::new(ErrorCode::EngineUnavailable, "Engine is stopped."))
+    }
+
+    fn submit(&self, request: NativeRequest) -> Result<(), PhoneError> {
+        // Native copies borrowed strings before returning, even on queue failure.
+        native_result(unsafe { sip_engine_request(self.handle()?, &request) })
     }
 
     pub(crate) fn request(
         &self,
         operation: i32,
         account_id: u32,
-        account: Option<&AccountConfig>,
         destination: Option<&str>,
         call_generation: u64,
+        enabled: bool,
     ) -> Result<(), PhoneError> {
-        self.request_strings(
+        let destination = cstring(destination.unwrap_or(""))?;
+        self.submit(NativeRequest {
             operation,
             account_id,
             call_generation,
-            account.map_or("", |a| a.registrar.as_str()),
-            account.map_or("", |a| a.username.as_str()),
-            account.map_or("", |a| a.password.as_str()),
-            destination.unwrap_or(""),
-            account,
-        )
+            enabled: i32::from(enabled),
+            destination: destination.as_ptr(),
+            ..Default::default()
+        })
     }
-    pub(crate) fn sound_request(
+
+    pub(crate) fn account_request(
         &self,
         operation: i32,
+        id: u32,
+        config: Option<&AccountConfig>,
+        enabled: bool,
+    ) -> Result<(), PhoneError> {
+        let Some(config) = config else {
+            return self.submit(NativeRequest {
+                operation,
+                account_id: id,
+                ..Default::default()
+            });
+        };
+        let registrar = cstring(&config.registrar)?;
+        let username = cstring(&config.username)?;
+        let password = cstring(&config.password)?;
+        let auth_username = cstring(config.auth_username.as_deref().unwrap_or(""))?;
+        let outbound_proxy = cstring(config.outbound_proxy.as_deref().unwrap_or(""))?;
+        let monitored_extensions = cstring(
+            &config
+                .monitored_extensions
+                .iter()
+                .map(|target| target.extension.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )?;
+        self.submit(NativeRequest {
+            operation,
+            account_id: id,
+            registrar: registrar.as_ptr(),
+            username: username.as_ptr(),
+            password: password.as_ptr(),
+            auth_username: auth_username.as_ptr(),
+            outbound_proxy: outbound_proxy.as_ptr(),
+            monitored_extensions: monitored_extensions.as_ptr(),
+            transport: match config.transport {
+                phone_core::SipTransport::Udp => 0,
+                phone_core::SipTransport::Tcp => 1,
+                phone_core::SipTransport::Tls => 2,
+            },
+            media_security: i32::from(
+                config.media_security == phone_core::MediaSecurityPolicy::Required,
+            ),
+            enabled: i32::from(enabled),
+            ..Default::default()
+        })
+    }
+
+    pub(crate) fn sound_request(
+        &self,
+        restore: bool,
         settings: &SoundSettings,
     ) -> Result<(), PhoneError> {
-        self.request_strings(
-            operation,
-            0,
-            0,
-            &settings.input_device,
-            &settings.output_device,
-            &settings.ring_device,
-            &format!(
-                "{}:{}:{}",
-                u8::from(settings.ringtone_enabled),
-                match settings.ringtone {
-                    phone_core::Ringtone::Classic => 0,
-                    phone_core::Ringtone::Soft => 1,
-                    phone_core::Ringtone::Short => 2,
-                },
-                settings.ringtone_volume
-            ),
-            None,
-        )
+        let input = cstring(&settings.input_device)?;
+        let output = cstring(&settings.output_device)?;
+        let ring = cstring(&settings.ring_device)?;
+        self.submit(NativeRequest {
+            operation: if restore { OP_SOUND_RESTORE } else { OP_SOUND },
+            input_device: input.as_ptr(),
+            output_device: output.as_ptr(),
+            ring_device: ring.as_ptr(),
+            enabled: i32::from(settings.ringtone_enabled),
+            ringtone_variant: match settings.ringtone {
+                phone_core::Ringtone::Classic => 0,
+                phone_core::Ringtone::Soft => 1,
+                phone_core::Ringtone::Short => 2,
+            },
+            ringtone_volume: u32::from(settings.ringtone_volume),
+            ..Default::default()
+        })
     }
+
     pub(crate) fn audio_test_request(
         &self,
         operation: i32,
         id: u64,
         device: &str,
     ) -> Result<(), PhoneError> {
-        self.request_strings(operation, 0, id, device, "", "", "", None)
-    }
-    pub(crate) fn preview_request(&self, operation: i32, device: &str) -> Result<(), PhoneError> {
-        self.request_strings(operation, 0, 0, device, "", "", "", None)
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn request_strings(
-        &self,
-        operation: i32,
-        account_id: u32,
-        call_generation: u64,
-        registrar: &str,
-        username: &str,
-        password: &str,
-        destination: &str,
-        account: Option<&AccountConfig>,
-    ) -> Result<(), PhoneError> {
-        let handle = self
-            .handle
-            .ok_or_else(|| PhoneError::new(ErrorCode::EngineUnavailable, "Engine is stopped."))?;
-        let registrar = cstring(registrar)?;
-        let username = cstring(username)?;
-        let password = cstring(password)?;
-        let destination = cstring(destination)?;
-        let auth_username = cstring(
-            account
-                .and_then(|a| a.auth_username.as_deref())
-                .unwrap_or(""),
-        )?;
-        let outbound_proxy = cstring(
-            account
-                .and_then(|a| a.outbound_proxy.as_deref())
-                .unwrap_or(""),
-        )?;
-        let transport = account.map_or(0, |a| match a.transport {
-            phone_core::SipTransport::Udp => 0,
-            phone_core::SipTransport::Tcp => 1,
-            phone_core::SipTransport::Tls => 2,
-        });
-        let media = i32::from(
-            account.is_some_and(|a| a.media_security == phone_core::MediaSecurityPolicy::Required),
-        );
-        let monitored_extensions = cstring(&account.map_or_else(String::new, |a| {
-            a.monitored_extensions
-                .iter()
-                .map(|t| t.extension.as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-        }))?;
-        let error = unsafe {
-            sip_engine_request(
-                handle.0.as_ptr(),
-                operation,
-                account_id,
-                call_generation,
-                registrar.as_ptr(),
-                username.as_ptr(),
-                password.as_ptr(),
-                destination.as_ptr(),
-                transport,
-                media,
-                auth_username.as_ptr(),
-                outbound_proxy.as_ptr(),
-                monitored_extensions.as_ptr(),
-            )
-        };
-        if error == 0 {
-            Ok(())
-        } else {
-            Err(native_error(error))
-        }
+        let device = cstring(device)?;
+        self.submit(NativeRequest {
+            operation,
+            call_generation: id,
+            device: device.as_ptr(),
+            ..Default::default()
+        })
     }
 
     pub(crate) fn shutdown(&mut self) -> Result<(), PhoneError> {
         if self.handle.is_none() {
             return Ok(());
         }
-        let request_result = self.request(5, 0, None, None, 0);
+        let request_result = self.submit(NativeRequest {
+            operation: OP_STOP,
+            ..Default::default()
+        });
         let result = self
             .thread
             .take()
@@ -1187,11 +1140,8 @@ impl NativeEngine {
                 sip_engine_destroy(handle.0.as_ptr());
             }
         }
-        if let Some(context) = self.context.take() {
-            unsafe {
-                drop(Box::from_raw(context.as_ptr()));
-            }
-        }
+        // C can no longer call the context after the event thread has joined.
+        drop(self.context.take());
         ENGINE_LEASE.store(false, Ordering::Release);
         match result? {
             Some(code) if code != 0 => Err(native_error(code)),
@@ -1206,20 +1156,23 @@ impl Drop for NativeEngine {
     }
 }
 
+fn native_result(code: i32) -> Result<(), PhoneError> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(native_error(code))
+    }
+}
+
 fn cstring(input: &str) -> Result<CString, PhoneError> {
     CString::new(input)
         .map_err(|_| PhoneError::new(ErrorCode::InvalidInput, "NUL bytes are not allowed."))
 }
-fn transfer_error(code: i32) -> PhoneError {
+fn sip_error(code: i32, fallback: &str) -> PhoneError {
     u16::try_from(code)
         .ok()
         .and_then(PhoneError::from_sip_status)
-        .unwrap_or_else(|| {
-            PhoneError::new(
-                ErrorCode::NativeFailure,
-                "Call transfer failed without a SIP response.",
-            )
-        })
+        .unwrap_or_else(|| PhoneError::new(ErrorCode::NativeFailure, fallback))
 }
 
 fn native_error(code: i32) -> PhoneError {
@@ -1348,6 +1301,7 @@ mod observation_tests {
             Self {
                 context: Box::new(CallbackContext {
                     snapshot: Arc::new(Mutex::new(state)),
+                    changed: Arc::new(Condvar::new()),
                     ready: mpsc::channel().0,
                 }),
                 events,
@@ -1379,6 +1333,85 @@ mod observation_tests {
                 detail: std::ptr::null(),
             };
             callback(&event, (&mut *self.context as *mut CallbackContext).cast());
+        }
+    }
+
+    #[test]
+    fn account_removal_rejection_remains_visible_during_an_incoming_call() {
+        let mut harness = Harness::new();
+        harness.event(EV_INCOMING, 0, 10, "Fixture", "100");
+        harness.event(EV_REMOVE_FAILED, 16, 10, "", "");
+        {
+            let state = harness.context.snapshot.lock().unwrap();
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call, CallState::Incoming);
+            assert_eq!(snapshot.last_error.as_ref().unwrap().code, ErrorCode::Busy);
+            assert!(snapshot.calls[0].last_error.is_none());
+        }
+        harness.event(EV_ACTIVE, 0, 10, "", "");
+        assert!(
+            harness
+                .context
+                .snapshot
+                .lock()
+                .unwrap()
+                .snapshot_for_read()
+                .last_error
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn native_account_completion_and_shutdown_wake_blocked_waiters() {
+        for kind in [EV_ACCOUNT_APPLIED, EV_ACCOUNT_REJECTED, EV_STOPPED] {
+            let mut harness = Harness::new();
+            let state = Arc::clone(&harness.context.snapshot);
+            let changed = Arc::clone(&harness.context.changed);
+            let (entered, waiting) = mpsc::channel();
+            let waiter = thread::spawn(move || {
+                let mut guard = state.lock().unwrap();
+                entered.send(()).unwrap();
+                while !guard.account_results.contains_key(&42) && !guard.stopped {
+                    let (next, timeout) = changed
+                        .wait_timeout(guard, std::time::Duration::from_secs(2))
+                        .unwrap();
+                    guard = next;
+                    assert!(
+                        !timeout.timed_out(),
+                        "native completion did not notify the waiter"
+                    );
+                }
+            });
+            waiting.recv().unwrap();
+            harness.event(kind, 0, 0, "", "");
+            waiter.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn native_sound_completion_wakes_a_blocked_waiter() {
+        for kind in [EV_AUDIO_APPLIED, EV_AUDIO_FAILED, EV_STOPPED] {
+            let mut harness = Harness::new();
+            let state = Arc::clone(&harness.context.snapshot);
+            let changed = Arc::clone(&harness.context.changed);
+            let (entered, waiting) = mpsc::channel();
+            let waiter = thread::spawn(move || {
+                let mut guard = state.lock().unwrap();
+                entered.send(()).unwrap();
+                while guard.sound_result.is_none() && !guard.stopped {
+                    let (next, timeout) = changed
+                        .wait_timeout(guard, std::time::Duration::from_secs(2))
+                        .unwrap();
+                    guard = next;
+                    assert!(
+                        !timeout.timed_out(),
+                        "native sound result did not notify the waiter"
+                    );
+                }
+            });
+            waiting.recv().unwrap();
+            harness.event(kind, 0, 0, "", "");
+            waiter.join().unwrap();
         }
     }
     #[test]
@@ -1508,23 +1541,25 @@ mod observation_tests {
             .snapshot
             .lock()
             .unwrap()
-            .snapshot
+            .snapshot_for_read()
             .call_connected_at_ms;
         assert!(connected.is_some());
         h.event(28, 0, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call, CallState::Held);
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call, CallState::Held);
             assert_eq!(
-                state.snapshot.caller.as_ref().unwrap().number.as_deref(),
+                snapshot.caller.as_ref().unwrap().number.as_deref(),
                 Some("123")
             );
         }
         h.event(29, 0, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::Active);
-        assert_eq!(state.snapshot.call_connected_at_ms, connected);
-        assert_eq!(state.snapshot.call_events.len(), 2);
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::Active);
+        assert_eq!(snapshot.call_connected_at_ms, connected);
+        assert_eq!(snapshot.call_events.len(), 2);
     }
 
     #[test]
@@ -1536,13 +1571,14 @@ mod observation_tests {
         h.event(28, 0, 10, "", "");
         h.event(9, 486, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::Incoming);
-        assert_eq!(state.snapshot.call_id.as_deref(), Some("11"));
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::Incoming);
+        assert_eq!(snapshot.call_id.as_deref(), Some("11"));
         assert_eq!(
-            state.snapshot.caller.as_ref().unwrap().number.as_deref(),
+            snapshot.caller.as_ref().unwrap().number.as_deref(),
             Some("200")
         );
-        assert!(state.snapshot.last_error.is_none());
+        assert!(snapshot.last_error.is_none());
     }
 
     #[test]
@@ -1553,11 +1589,12 @@ mod observation_tests {
             h.event(27, 0, 10, "", "");
         }
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::EarlyMedia);
-        assert_eq!(state.snapshot.call_events.len(), 64);
-        assert_eq!(state.snapshot.call_events_dropped, 16);
-        assert_eq!(state.snapshot.call_events[0].sequence, 17);
-        assert_eq!(state.snapshot.call_events[63].sequence, 80);
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::EarlyMedia);
+        assert_eq!(snapshot.call_events.len(), 64);
+        assert_eq!(snapshot.call_events_dropped, 16);
+        assert_eq!(snapshot.call_events[0].sequence, 17);
+        assert_eq!(snapshot.call_events[63].sequence, 80);
     }
 
     #[test]
@@ -1567,7 +1604,8 @@ mod observation_tests {
         h.event(9, 486, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            let error = state.snapshot.last_error.as_ref().unwrap();
+            let snapshot = state.snapshot_for_read();
+            let error = snapshot.last_error.as_ref().unwrap();
             assert_eq!(error.code, ErrorCode::SipBusy);
             assert_eq!(error.sip_status, Some(486));
         }
@@ -1579,13 +1617,14 @@ mod observation_tests {
                 .snapshot
                 .lock()
                 .unwrap()
-                .snapshot
+                .snapshot_for_read()
                 .last_error
                 .is_none()
         );
         h.event(10, 503, 11, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        let error = state.snapshot.last_error.as_ref().unwrap();
+        let snapshot = state.snapshot_for_read();
+        let error = snapshot.last_error.as_ref().unwrap();
         assert_eq!(error.code, ErrorCode::NativeFailure);
         assert_eq!(error.sip_status, None);
     }
@@ -1597,12 +1636,13 @@ mod observation_tests {
         h.event(8, 0, 10, "", "");
         h.event(32, 0, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        let error = state.snapshot.last_error.as_ref().unwrap();
+        let snapshot = state.snapshot_for_read();
+        let error = snapshot.last_error.as_ref().unwrap();
         assert_eq!(error.code, ErrorCode::NativeFailure);
         assert_eq!(error.sip_status, None);
-        assert_eq!(state.snapshot.call, CallState::Active);
+        assert_eq!(snapshot.call, CallState::Active);
         assert!(matches!(
-            state.snapshot.call_events.last().unwrap().event,
+            snapshot.call_events.last().unwrap().event,
             CallEventKind::TransferFailed
         ));
     }
@@ -1624,6 +1664,7 @@ mod observation_tests {
                 h.event(EV_TRANSFER_RESULT, status, 10, "", "");
                 {
                     let state = h.context.snapshot.lock().unwrap();
+                    let snapshot = state.snapshot_for_read();
                     let call = state.snapshot.calls.iter().find(|c| c.id == "10").unwrap();
                     assert_eq!(call.transfer, phone_core::TransferState::Failed);
                     let error = call
@@ -1635,10 +1676,10 @@ mod observation_tests {
                         assert_eq!(error.code, ErrorCode::NativeFailure);
                     }
                     if background {
-                        assert_eq!(state.snapshot.call_id.as_deref(), Some("20"));
-                        assert!(state.snapshot.last_error.is_none());
+                        assert_eq!(snapshot.call_id.as_deref(), Some("20"));
+                        assert!(snapshot.last_error.is_none());
                     } else {
-                        let selected_error = state.snapshot.last_error.as_ref().unwrap();
+                        let selected_error = snapshot.last_error.as_ref().unwrap();
                         assert_eq!(selected_error.code, error.code);
                         assert_eq!(selected_error.sip_status, error.sip_status);
                     }
@@ -1667,10 +1708,11 @@ mod observation_tests {
             }
             h.event(9, 0, 10, "", "");
             let state = h.context.snapshot.lock().unwrap();
-            let error = state.snapshot.last_error.as_ref().expect("setup failure");
+            let snapshot = state.snapshot_for_read();
+            let error = snapshot.last_error.as_ref().expect("setup failure");
             assert_eq!(error.code, ErrorCode::NativeFailure);
             assert_eq!(error.sip_status, None);
-            assert_eq!(state.snapshot.call, CallState::Idle);
+            assert_eq!(snapshot.call, CallState::Idle);
         }
     }
 
@@ -1692,8 +1734,9 @@ mod observation_tests {
             }
             h.event(9, 0, 10, "", "");
             let state = h.context.snapshot.lock().unwrap();
-            assert!(state.snapshot.last_error.is_none());
-            assert_eq!(state.snapshot.call, CallState::Idle);
+            let snapshot = state.snapshot_for_read();
+            assert!(snapshot.last_error.is_none());
+            assert_eq!(snapshot.call, CallState::Idle);
         }
     }
 
@@ -1702,12 +1745,13 @@ mod observation_tests {
         for (closed, expected_error) in [(9, false), (EV_ANSWER_CLOSED, true)] {
             let mut h = Harness::new();
             h.event(7, 0, 10, "", "100");
-            h.context.snapshot.lock().unwrap().snapshot.call = CallState::Answering;
+            h.context.snapshot.lock().unwrap().snapshot.calls[0].state = CallState::Answering;
             h.event(closed, 0, 10, "", "");
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call, CallState::Idle);
-            assert_eq!(state.snapshot.last_error.is_some(), expected_error);
-            if let Some(error) = &state.snapshot.last_error {
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call, CallState::Idle);
+            assert_eq!(snapshot.last_error.is_some(), expected_error);
+            if let Some(error) = &snapshot.last_error {
                 assert_eq!(error.code, ErrorCode::NativeFailure);
                 assert_eq!(error.sip_status, None);
             }
@@ -1727,9 +1771,10 @@ mod observation_tests {
         h.event(7, 0, 11, "", "200");
         h.event(EV_ANSWER_CLOSED, 0, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::Incoming);
-        assert_eq!(state.snapshot.call_id.as_deref(), Some("11"));
-        assert!(state.snapshot.last_error.is_none());
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::Incoming);
+        assert_eq!(snapshot.call_id.as_deref(), Some("11"));
+        assert!(snapshot.last_error.is_none());
     }
 
     #[test]
@@ -1739,14 +1784,14 @@ mod observation_tests {
         // Pinned baresip reports native RTP stream failures with its internal 701 sentinel.
         h.event(9, 701, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        let error = state
-            .snapshot
+        let snapshot = state.snapshot_for_read();
+        let error = snapshot
             .last_error
             .as_ref()
             .expect("native close failure must be visible");
         assert_eq!(error.code, ErrorCode::NativeFailure);
         assert_eq!(error.sip_status, None);
-        assert_eq!(state.snapshot.call, CallState::Idle);
+        assert_eq!(snapshot.call, CallState::Idle);
     }
     #[test]
     fn incoming_offers_keep_effective_account_identity_while_replacement_is_pending() {
@@ -1817,8 +1862,9 @@ mod observation_tests {
         }
         h.event(9, 0, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
+        let snapshot = state.snapshot_for_read();
         assert_eq!(
-            state.snapshot.last_error.as_ref().unwrap().code,
+            snapshot.last_error.as_ref().unwrap().code,
             ErrorCode::NativeFailure
         );
         let failure = state.snapshot.last_call_failure.as_ref().unwrap();
@@ -1838,15 +1884,17 @@ mod observation_tests {
         h.event(10, 11, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert!(state.snapshot.last_error.is_none());
+            let snapshot = state.snapshot_for_read();
+            assert!(snapshot.last_error.is_none());
             assert!(state.snapshot.calls[0].last_error.is_some());
             assert!(state.snapshot.last_call_failure.is_none());
         }
         h.event(50, 5, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call_id.as_deref(), Some("20"));
-            assert!(state.snapshot.last_error.is_none());
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call_id.as_deref(), Some("20"));
+            assert!(snapshot.last_error.is_none());
             assert!(state.snapshot.calls[1].last_error.is_none());
             assert_eq!(
                 state.snapshot.calls[0].last_error.as_ref().unwrap().code,
@@ -1856,10 +1904,11 @@ mod observation_tests {
         h.event(9, 0, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call_id.as_deref(), Some("20"));
-            assert_eq!(state.snapshot.call_account_id, Some(84));
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call_id.as_deref(), Some("20"));
+            assert_eq!(snapshot.call_account_id, Some(84));
             assert!(state.snapshot.calls[0].last_error.is_none());
-            assert!(state.snapshot.last_error.is_none());
+            assert!(snapshot.last_error.is_none());
             let failure = state.snapshot.last_call_failure.as_ref().unwrap();
             assert_eq!(failure.call_id, "10");
             assert_eq!(failure.account_id, 42);
@@ -1936,8 +1985,9 @@ mod observation_tests {
         h.event(EV_HOLD, 0, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call_id.as_deref(), Some("20"));
-            assert_eq!(state.snapshot.call, CallState::Active);
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call_id.as_deref(), Some("20"));
+            assert_eq!(snapshot.call, CallState::Active);
             assert_eq!(state.snapshot.calls.len(), 2);
             assert!(state.snapshot.calls[0].remote_held);
             assert_eq!(
@@ -1959,10 +2009,11 @@ mod observation_tests {
         h.event(9, 0, 20, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
-            assert_eq!(state.snapshot.call_id.as_deref(), Some("10"));
+            let snapshot = state.snapshot_for_read();
+            assert_eq!(snapshot.call_id.as_deref(), Some("10"));
             assert_eq!(state.snapshot.calls.len(), 1);
-            assert_eq!(state.snapshot.call_events.len(), 2);
-            assert!(state.snapshot.last_error.is_none());
+            assert_eq!(snapshot.call_events.len(), 2);
+            assert!(snapshot.last_error.is_none());
         }
         h.event(9, 0, 10, "", "");
         let events = h.events.lock().unwrap();
@@ -2006,10 +2057,10 @@ mod observation_tests {
                 h.event(9, 0, first, "", "");
                 h.event(9, 0, last, "", "");
                 let state = h.context.snapshot.lock().unwrap();
+                let snapshot = state.snapshot_for_read();
                 assert!(state.snapshot.calls.is_empty());
-                assert_eq!(state.snapshot.call, CallState::Idle);
-                let success: Vec<_> = state
-                    .snapshot
+                assert_eq!(snapshot.call, CallState::Idle);
+                let success: Vec<_> = snapshot
                     .call_events
                     .iter()
                     .filter(|event| matches!(event.event, CallEventKind::TransferSucceeded))
@@ -2029,13 +2080,15 @@ mod observation_tests {
         h.event(9, 0, 10, "", "");
         {
             let state = h.context.snapshot.lock().unwrap();
+            let snapshot = state.snapshot_for_read();
             assert!(state.snapshot.calls.is_empty());
-            assert!(state.snapshot.call_events.is_empty());
+            assert!(snapshot.call_events.is_empty());
         }
         h.event(EV_TRANSFER_RESULT, 200, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
+        let snapshot = state.snapshot_for_read();
         assert!(state.snapshot.calls.is_empty());
-        assert!(state.snapshot.call_events.iter().any(|event| {
+        assert!(snapshot.call_events.iter().any(|event| {
             event.call_id == "10" && matches!(event.event, CallEventKind::TransferSucceeded)
         }));
     }
@@ -2047,11 +2100,12 @@ mod observation_tests {
         h.event(8, 0, 10, "", "");
         h.event(22, 0, 11, "Second", "200");
         let state = h.context.snapshot.lock().unwrap();
+        let snapshot = state.snapshot_for_read();
         assert_eq!(state.call_generation, 10);
-        assert_eq!(state.snapshot.call_id.as_deref(), Some("10"));
-        assert_eq!(state.snapshot.call, CallState::Active);
+        assert_eq!(snapshot.call_id.as_deref(), Some("10"));
+        assert_eq!(snapshot.call, CallState::Active);
         assert_eq!(
-            state.snapshot.caller.as_ref().unwrap().number.as_deref(),
+            snapshot.caller.as_ref().unwrap().number.as_deref(),
             Some("100")
         );
         let events = h.events.lock().unwrap();
@@ -2071,9 +2125,10 @@ mod observation_tests {
         h.event(23, 0, 11, "", "4321");
         h.event(24, 500, 11, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::Incoming);
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::Incoming);
         assert_eq!(state.call_generation, 10);
-        assert!(state.snapshot.last_error.is_none());
+        assert!(snapshot.last_error.is_none());
         let failure = state.snapshot.last_call_failure.as_ref().unwrap();
         assert_eq!(failure.call_id, "11");
         assert_eq!(failure.account_id, 42);
@@ -2098,8 +2153,9 @@ mod observation_tests {
         h.event(23, 0, 10, "", "4321");
         h.event(24, 16, 10, "", "");
         let state = h.context.snapshot.lock().unwrap();
-        assert_eq!(state.snapshot.call, CallState::Idle);
-        let error = state.snapshot.last_error.as_ref().expect("dial failure");
+        let snapshot = state.snapshot_for_read();
+        assert_eq!(snapshot.call, CallState::Idle);
+        let error = snapshot.last_error.as_ref().expect("dial failure");
         assert_eq!(error.code, ErrorCode::NativeFailure);
         assert_eq!(error.sip_status, None);
     }

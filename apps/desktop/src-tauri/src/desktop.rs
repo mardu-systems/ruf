@@ -55,10 +55,19 @@ pub(crate) fn installed_path(executable: &Path, installation_roots: &[std::path:
             {
                 relative == Path::new("Ruf.app/Contents/MacOS/sip-desktop")
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(windows)]
             {
                 relative == Path::new("Ruf/sip-desktop.exe")
                     || relative == Path::new("Programs/Ruf/sip-desktop.exe")
+            }
+            #[cfg(target_os = "linux")]
+            {
+                relative == Path::new("sip-desktop")
+            }
+            #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+            {
+                let _ = relative;
+                false
             }
         })
     })
@@ -87,7 +96,12 @@ pub(crate) fn autostart_available(app: &tauri::AppHandle) -> bool {
         .filter_map(std::env::var_os)
         .map(std::path::PathBuf::from)
         .collect();
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    let roots = vec![
+        std::path::PathBuf::from("/usr/bin"),
+        std::path::PathBuf::from("/usr/local/bin"),
+    ];
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     let roots = Vec::new();
     installed_path(&executable, &roots)
 }
@@ -360,8 +374,10 @@ mod tests {
         let root = std::path::PathBuf::from("/installed");
         #[cfg(target_os = "macos")]
         let suffix = "Ruf.app/Contents/MacOS/sip-desktop";
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
         let suffix = "Ruf/sip-desktop.exe";
+        #[cfg(target_os = "linux")]
+        let suffix = "sip-desktop";
         assert!(installed_path(
             &root.join(suffix),
             std::slice::from_ref(&root)

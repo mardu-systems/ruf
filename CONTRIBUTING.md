@@ -8,9 +8,10 @@ preview. The [release checklist](docs/release-checklist.md) records distribution
 
 For a first contribution, follow the [preview tester guide](docs/testing-preview.md)
 or submit the [compatibility report form](https://github.com/mardu-systems/ruf/issues/new?template=compatibility_report.yml).
-Windows 11 audio, FreeSWITCH interoperability and fresh-Mac setup are specific
-areas where observed results help. Prepared issue scopes are in the
-[unpublished launch package](docs/releases/0.1.0-launch.md#issue-drafts).
+Linux/Windows physical audio, Intel/ARM64 platform checks, FreeSWITCH
+interoperability and fresh-install setup are areas where observed results help.
+Check the [current issues](https://github.com/mardu-systems/ruf/issues),
+[platform matrix](docs/platforms.md) and [Linux acceptance](docs/linux.md).
 
 ## Before starting
 
@@ -60,7 +61,8 @@ for security-sensitive reports.
 Use the commands in [development setup](docs/development.md), selecting checks
 appropriate to the change. Documentation-only PRs need formatting and link checks;
 runtime changes need relevant typecheck/build/tests. Desktop implementation changes
-also need macOS and Windows CI builds. Disclose unperformed checks and unavailable
+also need the applicable Linux, macOS and Windows CI builds. PRs select one
+native target per OS; main/manual/release runs retain the full CPU matrix. Disclose unperformed checks and unavailable
 hardware/platform tests.
 
 Explain the problem, resulting behavior, related issue, verification results and

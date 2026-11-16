@@ -20,7 +20,7 @@ body:
     id: platform
     attributes:
       label: Operating system and architecture
-      placeholder: "macOS 14.7, Apple Silicon; or Windows 11 24H2, x64"
+      placeholder: "macOS 14.7 ARM64; Windows 11 x64; Ubuntu 22.04 GNOME ARM64; Fedora KDE x64"
     validations:
       required: true
   - type: input
@@ -41,7 +41,7 @@ body:
     id: environment
     attributes:
       label: Network and audio setup
-      description: Describe LAN/NAT/VPN topology and microphone/headset/output model without identifying addresses.
+      description: Describe LAN/NAT/VPN topology and microphone/headset/output model without identifying addresses. On Linux include session type, PulseAudio/pipewire-pulse and package format.
     validations:
       required: true
   - type: textarea
@@ -56,6 +56,7 @@ body:
         - Mute and hold/resume:
         - DTMF digits, star and hash:
         - Direct/attended transfer:
+        - BLF extension state and recovery (if supported by the PBX):
         - Two accounts and outgoing identity:
         - Background notifications and actions:
         - Sleep/wake and network recovery:

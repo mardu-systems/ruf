@@ -86,3 +86,21 @@ replacement credential under a new opaque reference, explicitly supply the SIP
 password and save; the existing journaled save path then cleans the old
 reference. Reconnect performs no rotation. The app does not rewrite keychain ACLs
 or provide a blanket credential-access bypass.
+
+## Linux Secret Service
+
+Linux retains the existing account commands, metadata schema and typed errors.
+Secrets are exchanged using an encrypted Secret Service session on the user's
+session D-Bus; attributes are `service=org.rufapp.desktop` and `username=<opaque
+credential key>`. More than one matching item is rejected with
+`credentialFailure`; no arbitrary collection wins. Missing items return
+`credentialMissing`, missing/failed services return `credentialFailure`, and
+locked entries or dismissed unlocks return `credentialAccessRequired`.
+
+Background restoration and deletion never call Unlock or Prompt. A deletion
+request requiring a prompt returns `credentialAccessRequired` and leaves the
+durable deletion journal retryable. Explicit foreground save/reconnect may
+unlock or create the default collection outside the phone-session mutex;
+existing state revalidation and rollback still apply. Normal D-Bus calls have
+five-second deadlines; an explicit user authorization prompt may wait for the
+user. No secret is added to IPC responses, logs, history or accounts.json.

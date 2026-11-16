@@ -35,12 +35,14 @@ records, call IDs, device IDs/names, filesystem paths and raw native error text.
 Copy uses the same whitelist as preview. Native plain text accepts 1–1024 UTF-8
 bytes without controls; the report is compact JSON within this bound. Invalid text
 would return `invalidInput`; native pasteboard failures return `nativeFailure`.
-Clipboard support currently follows the existing macOS implementation; unsupported
-platforms, including Windows, return `engineUnavailable`. No actual clipboard
-write is performed by automated tests.
+The native clipboard fallback uses the existing macOS implementation or the
+GTK main loop on Linux desktop builds. Linux dispatch has a three-second
+deadline. Unsupported platforms, including Windows, return `engineUnavailable`. Linux isolated service
+tests exercise actual GTK clipboard dispatch; this is separate from user-initiated
+copying in an installed desktop. See [Linux clipboard](contacts.md#linux-clipboard-and-contacts).
 
 The settings UI first copies the preview's whitelisted JSON using the existing
 WebView Clipboard API, following the contact-number copy pattern. If unavailable,
 it falls back to `copy_diagnostics`. This permits supported Windows WebViews to
-copy while retaining the native macOS fallback. The explicit button is required;
+copy while retaining native macOS/Linux fallbacks. The explicit button is required;
 preview/loading never writes to the clipboard.
