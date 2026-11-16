@@ -9,7 +9,7 @@ diff --git a/modules/pulse/pulse.c b/modules/pulse/pulse.c
  
  
  /**
-@@ -40,6 +41,10 @@
+@@ -40,6 +41,22 @@
  
  
  static struct pa pa;
@@ -17,10 +17,22 @@ diff --git a/modules/pulse/pulse.c b/modules/pulse/pulse.c
 +
 +int pulse_error(void) { return atomic_load(&terminal_error); }
 +void pulse_failed(void) { atomic_store(&terminal_error, ENODEV); }
++
++/* The SIP loop calls this only after all failed streams have been released. */
++void pulse_recover(void)
++{
++	struct paconn_st *c = pa.paconn;
++	if (!c || !atomic_load(&terminal_error))
++		return;
++	pa_threaded_mainloop_lock(c->mainloop);
++	if (c->context && pa_context_get_state(c->context) == PA_CONTEXT_READY)
++		atomic_store(&terminal_error, 0);
++	pa_threaded_mainloop_unlock(c->mainloop);
++}
  
  
  static int paconn_start(struct paconn_st **ppaconn);
-@@ -91,6 +96,7 @@
+@@ -91,6 +108,7 @@
  
  	switch (pa_context_get_state(context)) {
  		case PA_CONTEXT_FAILED:
@@ -28,7 +40,7 @@ diff --git a/modules/pulse/pulse.c b/modules/pulse/pulse.c
  			pa_threaded_mainloop_signal(c->mainloop, 0);
  			mqueue_push(pa.q, 0, NULL);
  			break;
-@@ -183,16 +189,29 @@
+@@ -183,16 +201,29 @@
  		goto out;
  	}
  
@@ -59,7 +71,7 @@ diff --git a/modules/pulse/pulse.c b/modules/pulse/pulse.c
  	else
  		*ppaconn = c;
  
-@@ -264,15 +283,18 @@
+@@ -264,15 +295,18 @@
  	int err;
  
  	memset(&pa, 0, sizeof(pa));
@@ -94,7 +106,7 @@ diff --git a/modules/pulse/pulse.h b/modules/pulse/pulse.h
  	pa_stream *stream;
  	pa_sample_spec ss;
  	pa_buffer_attr attr;
-@@ -68,3 +69,7 @@
+@@ -68,3 +69,8 @@
  int pastream_start(struct pastream_st *st, void *arg);
  
  
@@ -102,6 +114,7 @@ diff --git a/modules/pulse/pulse.h b/modules/pulse/pulse.h
 +/* Terminal worker failure is observed on the SIP event loop. */
 +int pulse_error(void);
 +void pulse_failed(void);
++void pulse_recover(void);
 diff --git a/modules/pulse/pastream.c b/modules/pulse/pastream.c
 --- a/modules/pulse/pastream.c
 +++ b/modules/pulse/pastream.c
@@ -193,6 +206,34 @@ diff --git a/modules/pulse/pastream.c b/modules/pulse/pastream.c
  	int pa_err = 0;
  	int err = 0;
  
+@@ -185,21 +149,21 @@
+ 	if (str_len(st->device) && str_casecmp(st->device, "default") != 0) {
+ 		device = st->device;
+ 	}
++	pa_stream_flags_t flags = PA_STREAM_INTERPOLATE_TIMING |
++		PA_STREAM_ADJUST_LATENCY | PA_STREAM_AUTO_TIMING_UPDATE;
++	if (device)
++		flags |= PA_STREAM_DONT_MOVE;
+ 
+ 	if (st->direction == PA_STREAM_PLAYBACK) {
+ 		pa_err = pa_stream_connect_playback(st->stream,
+ 				device, &st->attr,
+-				PA_STREAM_INTERPOLATE_TIMING |
+-				PA_STREAM_ADJUST_LATENCY |
+-				PA_STREAM_AUTO_TIMING_UPDATE,
++				flags,
+ 				NULL, NULL);
+ 	}
+ 	else if (st->direction == PA_STREAM_RECORD) {
+ 		pa_err = pa_stream_connect_record(st->stream,
+ 				device, &st->attr,
+-				PA_STREAM_INTERPOLATE_TIMING |
+-				PA_STREAM_ADJUST_LATENCY |
+-				PA_STREAM_AUTO_TIMING_UPDATE);
++				flags);
+ 	}
+ 	else {
+ 		warning("pulse: stream %s unsupported stream "
 @@ -208,6 +172,16 @@
  		err = EINVAL;
  	}

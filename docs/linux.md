@@ -36,6 +36,11 @@ packaging tools. It changes neither the application's sandbox nor media path.
   PulseAudio or PipeWire's `pipewire-pulse` service must be running. There is no
   browser/WebAudio recording or second media pipeline. Device discovery opens
   no recording stream, omits monitor sources, and has a three-second deadline.
+  Explicit device routes stay on their selected microphone/speaker; removal
+  reports an audio failure rather than moving a fixed stream to another device.
+  After failed owners are released and the backend is ready, a new test/call can
+  use the reconnected device/server without restarting Ruf. See
+  [audio diagnostics](api/audio-diagnostics.md) for recovery and ownership rules.
 - Credentials use an encrypted Secret Service session over the user's D-Bus,
   with service `org.rufapp.desktop` and existing opaque account keys. A compatible
   unlocked provider is required, for example GNOME Keyring or a configured

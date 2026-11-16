@@ -272,6 +272,7 @@ static const char *platform_audio(void) {
 #ifdef __linux__
 /* Patched upstream worker status; callbacks never tear down their own worker. */
 extern int pulse_error(void);
+extern void pulse_recover(void);
 #endif
 static int ensure_platform_audio(struct engine *e) {
     if (e->platform_audio_loaded) {
@@ -468,6 +469,13 @@ static void check_audio_players(struct engine *e) {
         ua_hangup(dialog->ua, dialog->call, 0, NULL);
     }
     e->current = e->selected;
+#ifdef __linux__
+    /* A failure is observed and every old owner is released before recovery.
+       The existing pulse reconnect timer owns server reconnect attempts. */
+    if (backend_error && !e->test_id && !e->ring &&
+        !e->dialogs[0].call && !e->dialogs[1].call)
+        pulse_recover();
+#endif
 }
 
 /* Shutdown never depends on allocation or available pipe capacity. */

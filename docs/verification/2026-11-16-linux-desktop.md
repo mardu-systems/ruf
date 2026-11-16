@@ -1,5 +1,8 @@
 # Linux desktop icons and ARM64 VM verification
 
+The later [acceptance follow-up](2026-11-16-linux-acceptance.md) updates the real
+keyring, package-removal, hosted CI and issue status described below.
+
 Observed on 15–16 November 2026 on `codex/linux-foundation`, based on
 `b77f779`. The runtime environments were Ubuntu 22.04.5/GNOME and Fedora 44/KDE,
 both ARM64 guests in UTM on Apple Silicon. This supplements the

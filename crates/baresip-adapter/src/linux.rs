@@ -105,6 +105,130 @@ mod tests {
                 .start_audio_test(AudioTestKind::Speaker, "missing-linux-device")
                 .is_err()
         );
+
+        // A fixed input must fail closed when removed, then work again under
+        // the same ID without replacing the engine or changing saved routing.
+        let load_module = |arguments: &[&str]| {
+            let output = std::process::Command::new("pactl")
+                .arg("load-module")
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap()
+        };
+        let load_input = || {
+            load_module(&[
+                "module-remap-source",
+                "master=ruf_linux_sink.monitor",
+                "source_name=ruf_linux_replug_mic",
+            ])
+        };
+        let module = load_input();
+        let settings = phone_core::SoundSettings {
+            input_device: "ruf_linux_replug_mic".into(),
+            ..Default::default()
+        };
+        engine.set_sound_settings(&settings).unwrap();
+        let removed_owner = engine
+            .start_audio_test(AudioTestKind::Microphone, "ruf_linux_replug_mic")
+            .unwrap();
+        assert!(
+            std::process::Command::new("pactl")
+                .args(["unload-module", &module.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        loop {
+            let state = engine.snapshot().unwrap();
+            assert_eq!(state.sound_settings, settings);
+            if state.audio_test.is_none() {
+                assert!(state.audio_test_error.is_some());
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Removing a fixed microphone must stop capture, not move it to another input"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            engine
+                .start_audio_test(AudioTestKind::Microphone, "ruf_linux_replug_mic")
+                .is_err()
+        );
+        let module = load_input();
+        let recovered_owner = engine
+            .start_audio_test(AudioTestKind::Microphone, "ruf_linux_replug_mic")
+            .expect("Reconnected microphone must work without restarting Ruf");
+        assert_ne!(recovered_owner, removed_owner);
+        engine.stop_audio_test(&removed_owner).unwrap();
+        assert_eq!(
+            engine.snapshot().unwrap().audio_test.unwrap().id,
+            recovered_owner,
+            "An old owner must not stop the recovered capture"
+        );
+        engine.stop_audio_test(&recovered_owner).unwrap();
+        assert!(
+            std::process::Command::new("pactl")
+                .args(["unload-module", &module.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(engine.snapshot().unwrap().sound_settings, settings);
+
+        let load_output = || load_module(&["module-null-sink", "sink_name=ruf_linux_replug_sink"]);
+        let module = load_output();
+        let settings = phone_core::SoundSettings {
+            output_device: "ruf_linux_replug_sink".into(),
+            ring_device: "ruf_linux_replug_sink".into(),
+            ..Default::default()
+        };
+        engine.set_sound_settings(&settings).unwrap();
+        let removed_owner = engine
+            .start_audio_test(AudioTestKind::Speaker, "ruf_linux_replug_sink")
+            .unwrap();
+        assert!(
+            std::process::Command::new("pactl")
+                .args(["unload-module", &module.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let state = engine.snapshot().unwrap();
+            if state.audio_test.is_none() {
+                assert!(state.audio_test_error.is_some());
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let module = load_output();
+        let recovered_owner = engine
+            .start_audio_test(AudioTestKind::Speaker, "ruf_linux_replug_sink")
+            .expect("Reconnected speaker must work without restarting Ruf");
+        assert_ne!(recovered_owner, removed_owner);
+        engine.stop_audio_test(&recovered_owner).unwrap();
+        engine.preview_ringtone("ruf_linux_replug_sink").unwrap();
+        engine.stop_ringtone_preview().unwrap();
+        assert_eq!(engine.snapshot().unwrap().sound_settings, settings);
+        assert!(
+            std::process::Command::new("pactl")
+                .args(["unload-module", &module.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+
         let _owner = engine
             .start_audio_test(AudioTestKind::Microphone, "ruf_linux_mic")
             .unwrap();
@@ -128,9 +252,54 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
-        engine.shutdown().unwrap();
         let started = std::time::Instant::now();
         assert!(crate::audio_devices().is_err());
         assert!(started.elapsed() < Duration::from_secs(4));
+
+        // Restart only the private fixture server; keep this same Engine alive.
+        struct PrivateServer(std::process::Child);
+        impl Drop for PrivateServer {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let socket = std::env::var("PULSE_SERVER").unwrap();
+        let socket = socket.strip_prefix("unix:").unwrap();
+        let mut server = PrivateServer(
+            std::process::Command::new("pulseaudio")
+                .args([
+                    "--daemonize=no",
+                    "--exit-idle-time=-1",
+                    "--use-pid-file=no",
+                    "--disable-shm=yes",
+                    "-n",
+                    &format!("--load=module-native-protocol-unix socket={socket} auth-anonymous=1"),
+                    "--load=module-null-sink sink_name=ruf_linux_sink",
+                    "--load=module-remap-source master=ruf_linux_sink.monitor source_name=ruf_linux_mic",
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        let recovered_owner = loop {
+            assert!(
+                server.0.try_wait().unwrap().is_none(),
+                "Private audio server exited"
+            );
+            if let Ok(owner) = engine.start_audio_test(AudioTestKind::Microphone, "ruf_linux_mic") {
+                break owner;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Audio must recover after its server restarts without recreating the engine"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        engine.stop_audio_test(&recovered_owner).unwrap();
+        assert_eq!(engine.snapshot().unwrap().sound_settings, settings);
+        engine.shutdown().unwrap();
     }
 }
