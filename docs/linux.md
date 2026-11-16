@@ -51,6 +51,14 @@ packaging tools. It changes neither the application's sandbox nor media path.
   authorization in the desktop service. Only signals from the daemon's unique
   bus owner are accepted. OS calls have three-second deadlines. A daemon restart
   requires restarting Ruf; an old daemon's ids cannot authorize a new banner.
+  The notification icon and `desktop-entry` hint use `sip-desktop`, matching the
+  packaged icon and GTK's Wayland application id. DEB and RPM include a hidden
+  `sip-desktop.desktop` alias so desktops can resolve window and notification
+  icons. The visible launcher remains `Ruf.desktop`; the alias adds no menu item.
+  Tauri also copies DEB files into AppImages, so AppImage packaging explicitly
+  replaces the alias with a visible Ruf launcher with freedesktop categories.
+  AppImages require desktop integration for host-side window/icon association;
+  bundled files are not installed into the host's application or icon directories.
 - Clipboard writes run on Tauri's existing GTK main loop and have a three-second
   deadline. No external clipboard command or unrestricted shell access is added.
 - Autostart uses the existing Tauri plugin for installed release executables in
@@ -81,6 +89,10 @@ built executable stays running in a fresh Xvfb/D-Bus session:
 xvfb-run -a dbus-run-session -- bash tests/interop/linux/startup.sh path/to/sip-desktop
 ```
 
+The startup check exports its temporary XDG directories to D-Bus activation too,
+so portal/keyring services do not reuse the logged-in desktop's storage. Cleanup
+unmounts an owned document-portal FUSE mount before deleting the test directory.
+
 `test:linux` creates a private D-Bus/Xvfb session, temporary XDG directories,
 synthetic Secret Service entries, an in-process test notification daemon and
 virtual PulseAudio endpoints. It does not use the logged-in desktop's keyring,
@@ -88,6 +100,12 @@ notifications or microphone. It verifies credential replacement and locked-store
 background access, caller-text escaping, action origin/binding/withdrawal,
 clipboard dispatch, native device routing and audio tests. It is an OS-service
 integration check, not a physical hardware or Wayland qualification.
+
+The notification integration test checks the actual icon name and desktop-entry
+hint received over D-Bus. `tests/interop/linux/bundles.sh <target>` also checks
+the visible launcher and icon in the built DEB/AppImage, the hidden DEB desktop
+alias and its content digest in the RPM file manifest. It rejects an AppImage
+whose visible launcher is replaced by the hidden alias.
 
 The isolated checks also cover missing D-Bus services, a stalled notification
 daemon, idempotent credential deletion and terminal audio-server loss.
@@ -103,6 +121,10 @@ Existing portable/native Rust tests, Clippy, frontend/UI checks and generated DT
 verification remain required. The Linux desktop workflow builds the SDK before
 native checks and preserves separate Asterisk interoperability coverage. Build
 hash manifests and compiled SBOMs accompany all three installer formats.
+
+Observed Ubuntu/GNOME and Fedora/KDE ARM64 VM results, package hashes and the
+remaining hardware/keyring checks are recorded in the
+[desktop verification report](verification/2026-11-16-linux-desktop.md).
 
 ## Manual release acceptance
 
