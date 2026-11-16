@@ -12,8 +12,10 @@ and installer for each target. It does not establish hardware/provider acceptanc
 | Linux GNU  | ARM64 / aarch64       | `aarch64-unknown-linux-gnu` | `ubuntu-22.04-arm` | DEB, RPM, AppImage |
 | Windows 11 | x86_64                | `x86_64-pc-windows-msvc`    | `windows-2022`     | NSIS               |
 
-The existing experimental Windows ARM64 changes are separate from this matrix's
-release selection. These changes neither publish nor qualify that target.
+An additional experimental Windows ARM64 CI job uses `windows-11-arm` to build
+`aarch64-pc-windows-msvc` and retain its NSIS installer. It remains separate from
+this matrix's release selection and does not establish Windows ARM64 hardware,
+audio or SIP acceptance.
 
 ## Linux distributions
 

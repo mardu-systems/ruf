@@ -12,11 +12,13 @@ Setup does not push, tag or publish a release.
   syntax, versions, generated DTOs, frontend typecheck/build and portable Rust
   linting/tests, plus a separate browser-state regression job.
 - **Desktop build**: reusable workflow called by CI and release; macOS ARM64/Intel and Linux GNU x64/ARM64 plus
-  Windows x64 build the pinned native SDK, run native workspace Clippy/tests and
+  Windows x64/ARM64 build the pinned native SDK, run native workspace Clippy/tests and
   produce target-specific installers with the native feature, plus each target’s compiled
   SBOM and build-hash manifest. A Linux Docker job verifies
   authenticated Asterisk calling and returned 440 Hz RTP audio. Hosted
   compilation does not qualify audio, hardware integration or SIP compatibility.
+  The ARM64 NSIS installer is retained as `desktop-aarch64-pc-windows-msvc` on
+  `windows-11-arm`; it is experimental and is not attached to the release draft.
 - **Draft release**: a pushed `v<version>` tag must match package/Cargo versions.
   Versioned notes at `docs/releases/<version>.md` must exist. The same reusable
   quality checks as branch CI, all native jobs and the Asterisk interoperability
@@ -153,7 +155,8 @@ macOS/vcpkg cache. Headless Asterisk coverage remains separate.
 session; it does not qualify physical audio or Wayland. All Linux installers
 and their compiled inventory/hash evidence are uploaded under the Linux target.
 Release drafts require and attach the Linux packages alongside
-both macOS architectures and Windows x64 artifacts. No release is published by these changes.
+both macOS architectures and Windows x64 artifacts; the experimental Windows ARM64
+artifact remains separate. No release is published by these changes.
 
 The release collector (`bun scripts/release-artifacts.ts artifacts <tag>`) requires
 five native targets: both macOS CPUs, both Linux CPUs and Windows x64. It validates

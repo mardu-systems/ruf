@@ -28,6 +28,7 @@ if (!identity.image || !identity.imageVersion)
   );
 
 if (process.platform === "win32") {
+  const architecture = process.arch === "arm64" ? "arm64" : "x64";
   const programFiles = process.env["ProgramFiles(x86)"];
   const vcpkg = process.env.VCPKG_INSTALLATION_ROOT ?? process.env.VCPKG_ROOT;
   if (!programFiles || !vcpkg)
@@ -41,7 +42,9 @@ if (process.platform === "win32") {
       "-products",
       "*",
       "-requires",
-      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      process.arch === "arm64"
+        ? "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+        : "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
       "-property",
       "installationPath",
     ],
@@ -57,7 +60,12 @@ if (process.platform === "win32") {
   identity.compiler = new Bun.CryptoHasher("sha256")
     .update(
       await Bun.file(
-        join(installation, "VC/Tools/MSVC", version, "bin/Hostx64/x64/cl.exe"),
+        join(
+          installation,
+          "VC/Tools/MSVC",
+          version,
+          `bin/Host${architecture}/${architecture}/cl.exe`,
+        ),
       ).bytes(),
     )
     .digest("hex");
