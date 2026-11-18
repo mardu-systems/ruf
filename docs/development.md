@@ -10,7 +10,7 @@ and run directly with Bun. `bun run check` checks both the desktop app and
 the scripts/tests; `bun run check:tooling` runs only the strict tooling check
 from `tsconfig.tooling.json`. Running a script or `bun test` alone does not run
 that check. Bun and Playwright types are development dependencies; the browser
-CLI remains pinned separately to `@playwright/cli@0.1.23`, with matching
+CLI remains pinned separately to `@playwright/cli@0.1.24`, with matching
 `playwright-core` types. See [tooling command contracts](api/tooling.md).
 
 Use `Bun.file`, `Bun.write`, `Bun.CryptoHasher` and `Bun.spawn` where they fit
@@ -76,20 +76,29 @@ documentation. The `desktop:build` wrapper always supplies a concrete Rust targe
 `target/<triple>/release/bundle`. The macOS examples below use the supported
 native macOS target (`aarch64-apple-darwin` or `x86_64-apple-darwin`).
 
-If macOS packaging reports that `rust-objcopy` cannot load `libLLVM.dylib`, first
-check the helper in the pinned Rustup toolchain. A local 1.98.1 installation had
-the library in its root `lib` directory but an incorrect helper runtime search
-path. The following process-local workaround was verified; it does not change
-the toolchain or disable stripping:
+If macOS packaging reports that `rust-objcopy` cannot load `libLLVM.dylib`, invoke
+Cargo through Rustup's proxies. Putting the toolchain's raw `bin` directory on
+`PATH` bypasses Rustup's `DYLD_FALLBACK_LIBRARY_PATH` setup. A plain
+`DYLD_LIBRARY_PATH` override did not reliably survive the complete packaging path
+on this host. With Homebrew Rustup, select its existing proxies instead:
 
 ```sh
-DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
-  bun run desktop:build --features native --bundles app,dmg
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+bun run desktop:build --features native --bundles app,dmg
 ```
 
-Cargo can replay the old warning from a cached host build helper. If that happens,
-`cargo clean --locked --release -p baresip-adapter` clears the affected release
-cache before rebuilding with the workaround above.
+For other Rustup installations, use the standard Cargo proxy directory
+(`~/.cargo/bin`). `rustup run 1.100.0 bun run desktop:build --features native`
+also selects the pinned compiler with its runtime environment. Do not patch the
+installed toolchain or disable stripping. Cargo can replay old warnings from
+cached host build helpers; if needed, clean only the affected release packages:
+
+```sh
+cargo clean --locked --release -p baresip-adapter -p sip-desktop
+cargo clean --locked --release --target aarch64-apple-darwin -p baresip-adapter -p sip-desktop
+```
+
+Use `x86_64-apple-darwin` for an Intel build. Rebuild after cleaning.
 
 Use Rustup's pinned compiler on `PATH`. For OpenSSL deployment-target errors,
 follow the [compatible static build instructions](../native/README.md#openssl-and-the-macos-minimum).
@@ -339,7 +348,7 @@ these OS behaviors.
 ## Browser state and layout regressions
 
 Run `bun run test:ui:flows` for the phone, Settings and compact-layout scenarios.
-The runner starts its own loopback Vite server, uses pinned Playwright CLI 0.1.23
+The runner starts its own loopback Vite server, uses pinned Playwright CLI 0.1.24
 through Bun, and closes its browser/server afterward. All SIP/account/device IPC is
 synthetic; this check cannot register accounts, place calls or access a keychain.
 Captures go to the ignored `output/playwright/` directory.
@@ -358,7 +367,7 @@ accessible description.
 Install Chromium when no browser is available:
 
 ```sh
-bunx --package @playwright/cli@0.1.23 playwright-cli install-browser chromium
+bunx --package @playwright/cli@0.1.24 playwright-cli install-browser chromium
 bun run test:ui:flows
 ```
 

@@ -125,6 +125,14 @@ conversion exit nonzero. See [media provenance](../screenshots/README.md).
 - Browser scenarios/installers in `tests/ui/browser/*.ts` are imported by the
   regression and screenshot wrappers. They are not standalone CLI commands.
 
+`bun run test:linux` accepts no arguments and requires a Linux host, a built
+native SDK and the desktop prerequisites listed in [Linux setup](../linux.md).
+It runs the GLib string-iterator regression in release mode, then creates the
+existing private D-Bus/Xvfb/PulseAudio/Secret-Service session for OS-service tests.
+Optimized GLib failure, missing services, Cargo errors or service-test failure
+exit nonzero; unsupported hosts fail before creating a session. It does not use
+the user's desktop/keyring or qualify physical audio hardware.
+
 Native workspace tests still return failure when any Cargo partition fails and
 retain its logs. `bun run test:native` accepts only the optional `--adapter` flag
 for headless adapter checks; other arguments fail before building. It builds the

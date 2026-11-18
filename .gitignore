@@ -21,5 +21,7 @@ Thumbs.db
 /output/playwright/
 /native/build/
 /native/install/
+/vendor/glib/Cargo.lock
+/vendor/glib/target/
 
 .impeccable/

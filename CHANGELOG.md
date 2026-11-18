@@ -2,6 +2,9 @@
 
 ## Unreleased · Development
 
+- Play a short local tone when the last connected call has ended.
+- Stream history searches with a transient contact index, backport the GLib string-iterator soundness fix and build Windows OpenSSL from a pinned maintained LTS recipe. Reject stale Windows TLS SDKs and document correct Rustup invocation for macOS stripping.
+- Refresh Rust, Tauri, SQLite, localization, frontend tooling and pinned CI/lab dependencies. Keep incompatible major upgrades deferred; the dependency review records remaining upstream maintenance and OpenSSL support gaps.
 - Build the native Linux desktop on GNU x64 or ARM64, with DEB, RPM and AppImage packages. The published 0.1.1 installers do not include these development changes.
 - Use Linux Secret Service for encrypted account passwords, desktop notifications with answer/reject actions, tray/background operation and installed-app autostart.
 - Keep Linux microphone, conversation and ringtone outputs separate through PulseAudio or pipewire-pulse. Fixed routes stay on the selected device; new tests and calls recover after failed owners are released and the device or audio server returns.

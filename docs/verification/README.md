@@ -21,6 +21,12 @@ packaging and release validation for both CPU families.
 
 ## Detailed records retained
 
+The [dependency refresh and repository review, 16 November](2026-11-16-dependency-review.md)
+records updated tooling/runtime pins, observed local checks, incompatible major
+versions and the follow-up fixes for Windows OpenSSL, GLib, history search and
+Rust/LLVM stripping. Native Windows qualification remains pending; it does not
+qualify new hosted CI or physical hardware.
+
 | Record                                                                                    | Evidence and boundary                                                                                                                                                                                                                                                       |
 | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [PR CI platform fixes, 16 November](2026-11-16-ci-platform-fixes.md)                      | All seven PR jobs green at `cf5102f`, 13:48 elapsed; native Linux x64/macOS ARM64/Windows x64 tests and packages, browser checks and full Asterisk/security lab. SDK rebuilds included; no warm-cache/full-matrix or physical-device claim.                                 |

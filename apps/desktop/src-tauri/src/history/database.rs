@@ -216,6 +216,55 @@ impl HistoryDb {
         );
         Ok((self.read_rows(&sql, params![limit, offset])?, total))
     }
+    pub(super) fn query_page(
+        &self,
+        query: &HistoryQuery,
+        contacts: &[Contact],
+        accounts: &[AccountSnapshot],
+        preferences: &phone_core::ContactsPreferences,
+    ) -> Result<HistoryPage, PhoneError> {
+        validate_query(query)?;
+        if query.search.trim().is_empty() && query.contact_numbers.is_empty() {
+            let (entries, total) =
+                self.page(query.filter, query.offset, query.limit.unwrap_or(50))?;
+            let mut page = project_page(
+                entries.into_iter().map(Ok),
+                &HistoryQuery {
+                    offset: 0,
+                    ..query.clone()
+                },
+                contacts,
+                accounts,
+                None,
+                preferences,
+            )?;
+            page.total = total;
+            page.has_more =
+                u64::from(query.offset) + u64::from(query.limit.unwrap_or(50)) < u64::from(total);
+            return Ok(page);
+        }
+        let sql = format!(
+            "SELECT facts FROM calls{} ORDER BY started_at DESC,id DESC",
+            Self::predicate(query.filter)
+        );
+        let mut statement = self.connection.prepare(&sql).map_err(|_| storage_error())?;
+        let facts = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|_| storage_error())?;
+        // Keep only one decoded row and the requested page in memory. Contact
+        // names remain transient; never persist them to enable SQL filtering.
+        project_page(
+            facts.map(|facts| {
+                serde_json::from_str(&facts.map_err(|_| storage_error())?)
+                    .map_err(|_| storage_error())
+            }),
+            query,
+            contacts,
+            accounts,
+            None,
+            preferences,
+        )
+    }
     pub(super) fn delete(&mut self, id: &str) -> Result<bool, PhoneError> {
         let entry = self.get(id)?;
         if entry.outcome == CallOutcome::InProgress {
@@ -635,6 +684,100 @@ mod tests {
         );
         assert!(!db.observe(started(1)).unwrap());
         assert!(db.entries(HistoryFilter::All).unwrap().is_empty());
+    }
+    #[test]
+    fn search_pages_use_current_contacts_and_report_errors_beyond_the_page() {
+        let mut db = db();
+        for id in 0..150 {
+            let mut start = started(id);
+            start.at_ms += id;
+            if let ObservedCallKind::Started {
+                number,
+                remote_name,
+                ..
+            } = &mut start.kind
+            {
+                *number = Some(if id % 2 == 0 { "123" } else { "999" }.into());
+                *remote_name = (id % 3 == 0).then(|| "Literal %_".into());
+            }
+            db.observe(start).unwrap();
+        }
+        let contacts = vec![Contact {
+            id: "authorized".into(),
+            source: phone_core::ContactSource::Macos,
+            name: "Current name".into(),
+            organization: String::new(),
+            favorite: false,
+            phones: vec![phone_core::ContactPhone {
+                label: String::new(),
+                number: "123".into(),
+                destination: Some("123".into()),
+            }],
+        }];
+        let preferences = Default::default();
+        let query = HistoryQuery {
+            search: "CURRENT NAME".into(),
+            offset: 5,
+            limit: Some(7),
+            ..Default::default()
+        };
+        let page = db
+            .query_page(&query, &contacts, &[account()], &preferences)
+            .unwrap();
+        assert_eq!(page.total, 75);
+        assert!(page.has_more);
+        assert_eq!(page.entries.len(), 7);
+        assert_eq!(page.entries[0].started_at_ms, 238);
+        assert_eq!(page.entries[0].callback_account_id, Some(1));
+        assert_eq!(
+            page.entries[0].contact.as_ref().unwrap().name,
+            "Current name"
+        );
+        assert_eq!(
+            db.query_page(&query, &[], &[], &preferences).unwrap().total,
+            0
+        );
+        assert!(
+            db.entries(HistoryFilter::All)
+                .unwrap()
+                .iter()
+                .all(|row| row.contact.is_none())
+        );
+
+        let query = HistoryQuery {
+            search: "%_".into(),
+            contact_numbers: vec!["123".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            db.query_page(&query, &contacts, &[], &preferences)
+                .unwrap()
+                .total,
+            25
+        );
+        let query = HistoryQuery {
+            offset: u32::MAX,
+            ..query
+        };
+        let page = db.query_page(&query, &contacts, &[], &preferences).unwrap();
+        assert_eq!(page.total, 25);
+        assert!(page.entries.is_empty());
+        assert!(!page.has_more);
+
+        db.connection
+            .execute("UPDATE calls SET facts='invalid' WHERE started_at=100", [])
+            .unwrap();
+        let query = HistoryQuery {
+            search: "name".into(),
+            limit: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(
+            db.query_page(&query, &contacts, &[], &preferences)
+                .unwrap_err()
+                .code,
+            ErrorCode::StorageFailure
+        );
     }
     #[test]
     fn database_pagination_filters_and_orders_newest_first() {

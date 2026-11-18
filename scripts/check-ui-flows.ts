@@ -35,7 +35,7 @@ const session = `sip-flows-${process.pid}`;
 const cli = [
   "bunx",
   "--package",
-  "@playwright/cli@0.1.23",
+  "@playwright/cli@0.1.24",
   "playwright-cli",
   `-s=${session}`,
 ];

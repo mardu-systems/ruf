@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Called only by scripts/check-linux.ts inside a private D-Bus/Xvfb session.
 set -euo pipefail
+# The GLib out-pointer soundness regression must also execute optimized code.
+cargo test --locked -p baresip-adapter --features desktop --release glib_variant_string_iteration
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR/keyring"
 chmod 700 "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR/keyring"
 cleanup() {

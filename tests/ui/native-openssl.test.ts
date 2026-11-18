@@ -33,8 +33,10 @@ add_subdirectory("${resolve("native/openssl-probe")}" probe)
       );
       const build = join(directory, "build");
       for (const [name, version] of [
-        ["first", "3.0.0"],
-        ["replacement", "3.1.0"],
+        ["old-lts-patch", "3.5.4"],
+        ["unsupported-series", "3.6.5"],
+        ["first", "3.5.9"],
+        ["replacement", "3.5.10"],
       ] as const) {
         const root = join(directory, name);
         mkdirSync(join(root, "include/openssl"), { recursive: true });
@@ -61,6 +63,11 @@ add_subdirectory("${resolve("native/openssl-probe")}" probe)
           ],
           { encoding: "utf8" },
         );
+        if (name === "old-lts-patch" || name === "unsupported-series") {
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain("Windows builds require OpenSSL");
+          continue;
+        }
         expect(result.status).toBe(0);
         const resolved = JSON.parse(
           readFileSync(join(build, "openssl-Release.json"), "utf8"),

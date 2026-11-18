@@ -40,6 +40,8 @@ test("full runs retain both CPUs, package formats and independent OpenSSL prefix
   ]);
   for (const row of desktopTargets(false))
     expect(full.find(({ target }) => target === row.target)).toEqual(row);
+  for (const row of full.filter(({ target }) => target.includes("windows")))
+    expect(row["openssl-overlay"]).toBe("native/vcpkg-ports/**");
 });
 
 test("matrix CLI exports usable GitHub output and rejects unknown scopes", () => {

@@ -46,6 +46,30 @@ fn failure() -> PhoneError {
 mod tests {
     use super::*;
     #[test]
+    fn glib_variant_string_iteration_preserves_both_directions_and_borrowed_text() {
+        use gtk::glib::variant::ToVariant;
+        let texts = ["", "Ruf", "Grüße", "☎"];
+        let variant = texts.to_variant();
+        let iter = || variant.array_iter_str().unwrap();
+        assert_eq!(iter().collect::<Vec<_>>(), texts);
+        assert_eq!(
+            iter().rev().collect::<Vec<_>>(),
+            texts.into_iter().rev().collect::<Vec<_>>()
+        );
+        let mut mixed = iter();
+        assert_eq!(mixed.next_back(), Some("☎"));
+        assert_eq!(mixed.next(), Some(""));
+        assert_eq!(mixed.next_back(), Some("Grüße"));
+        assert_eq!(mixed.next(), Some("Ruf"));
+        assert_eq!(mixed.next(), None);
+        assert_eq!(mixed.next_back(), None);
+        assert_eq!(iter().nth(2), Some("Grüße"));
+        assert_eq!(iter().nth_back(2), Some("Ruf"));
+        assert_eq!(iter().last(), Some("☎"));
+        let empty = Vec::<String>::new().to_variant();
+        assert_eq!(empty.array_iter_str().unwrap().next_back(), None);
+    }
+    #[test]
     #[ignore = "requires the isolated X11 session started by test:linux"]
     fn linux_clipboard_uses_the_running_gtk_main_loop() {
         assert_eq!(std::env::var("RUF_LINUX_TEST_SESSION").as_deref(), Ok("1"));

@@ -62,6 +62,12 @@ review remains necessary before a public production release.
 
 ## About page and project SBOM
 
+The Linux GLib 0.18.5 component identifies the local soundness backport with
+`ruf:patch:upstream` and `ruf:patch:advisory` properties plus
+`ruf:patch:sha256`, the SHA-256 of its patched `src/variant_iter.rs`. Its upstream
+version is retained; this is a backport, not an invented upstream release. See
+[vendor provenance](../vendor/README.md) for the exact original crate and change.
+
 The About Ruf section in Settings identifies **Mardu GmbH** as Ruf's author/developer and
 links to its website, legal notice and website privacy policy. This attribution
 does not replace the project's collective copyright notice or third-party rights.
