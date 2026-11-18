@@ -53,6 +53,25 @@ test("portable SBOM records the target and Cargo relationships without native li
   expect(JSON.stringify(bill)).not.toContain(process.cwd());
 });
 
+test("Linux SBOM identifies the GLib soundness backport without inventing a release version", async () => {
+  const bill = await createSoftwareBill({
+    ...portable,
+    target: "aarch64-unknown-linux-gnu",
+  });
+  const glib = bill.components.find((item) => item.name === "glib")!;
+  expect(glib.version).toBe("0.18.5");
+  expect(glib.properties).toContainEqual({
+    name: "ruf:patch:advisory",
+    value: "RUSTSEC-2024-0429",
+  });
+  expect(glib.properties).toContainEqual({
+    name: "ruf:patch:sha256",
+    value: createHash("sha256")
+      .update(await Bun.file("vendor/glib/src/variant_iter.rs").bytes())
+      .digest("hex"),
+  });
+});
+
 // Portable CI has no native SDK; desktop macOS CI builds it before UI tests.
 test.skipIf(!existsSync("native/install/aarch64-apple-darwin/sdk.json"))(
   "native SBOM includes the SDK OpenSSL version and native linkage edges",
@@ -118,6 +137,26 @@ test("native SDK identity and linkage validation also run without an installed S
     addNative(bill, context, { ...sdk, openssl: { version: "" } }),
   ).toThrow();
   const changedControls = structuredClone(bill);
+  for (const target of ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]) {
+    for (const version of ["3.5.4", "3.6.5", "3.6.5-extra", "3.5.9-extra"]) {
+      expect(() =>
+        addNative(
+          structuredClone(bill),
+          { ...context, target },
+          { ...sdk, target, openssl: { version } },
+        ),
+      ).toThrow("Windows SDK requires OpenSSL");
+    }
+    for (const version of ["3.5.9", "3.5.10"]) {
+      expect(() =>
+        addNative(
+          structuredClone(bill),
+          { ...context, target },
+          { ...sdk, target, openssl: { version } },
+        ),
+      ).not.toThrow();
+    }
+  }
   addNative(changedControls, context, {
     ...sdk,
     patches: {

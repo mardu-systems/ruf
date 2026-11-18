@@ -47,7 +47,7 @@ struct native_dialog {
     struct call *call;
     struct ua *ua;
     bool answered, muted, consultation, hold_target, return_held, local_ending, playback_failed;
-    bool hold_explicit, return_pending;
+    bool hold_explicit, return_pending, established;
     uint32_t account_id;
     uint64_t generation, deadline, transfer_peer_generation;
     int pending, recovery;
@@ -298,6 +298,24 @@ static void stop_ring(struct engine *e) {
     if (e->ring) e->ring = mem_deref(e->ring);
     e->preview = false;
 }
+/* A short local cue on the conversation output, never in the SIP media. */
+static void play_hangup_tone(struct engine *e) {
+    const uint32_t rate = 48000, samples = rate / 5;
+    struct mbuf *tone = mbuf_alloc(samples * sizeof(int16_t));
+    if (!tone) return;
+    for (uint32_t i = 0; i < samples; ++i) {
+        double seconds = (double)i / rate;
+        double fade = fmin(1.0, fmin(seconds, 0.2 - seconds) / 0.01);
+        double phase = 2.0 * 3.141592653589793 * (520.0 - 450.0 * seconds) * seconds;
+        int16_t sample = (int16_t)(2000.0 * fade * sin(phase));
+        (void)mbuf_write_mem(tone, (const uint8_t *)&sample, sizeof(sample));
+    }
+    tone->pos = 0;
+    (void)play_tone(&e->ring, baresip_player(), tone, rate, 1, 1,
+        platform_audio(), *e->output_device ? e->output_device : "default");
+    mem_deref(tone);
+}
+
 static int start_ring(struct engine *e, const char *device, bool preview) {
     int error = sip_audio_device_available(device, 0);
     if (!error) error = ensure_platform_audio(e);
@@ -701,7 +719,7 @@ static void event_handler(enum bevent_ev kind, struct bevent *event, void *arg) 
     case BEVENT_CALL_REDIRECT:
         if (e->current->call == call) emit(e, EV_REDIRECT, event_status(bevent_get_text(event), ','));
         break;
-    case BEVENT_CALL_ESTABLISHED: if (e->current->call == call) { e->current->answered = true; stop_ring(e); emit(e, EV_ACTIVE, 0); } break;
+    case BEVENT_CALL_ESTABLISHED: if (e->current->call == call) { e->current->answered = true; e->current->established = true; stop_ring(e); emit(e, EV_ACTIVE, 0); } break;
     case BEVENT_CALL_CLOSED:
         if (e->current->call == call) {
             /* A sent answer without ACK is a failed setup, unlike an unanswered
@@ -719,7 +737,11 @@ static void event_handler(enum bevent_ev kind, struct bevent *event, void *arg) 
             stop_ring(e); e->current->call = NULL; e->current->ua = NULL;
             emit(e, answer_failed ? EV_ANSWER_CLOSED : EV_CLOSED, call_scode(call));
             e->current->account_id = 0;
+            bool established = e->current->established;
             dialog_closed(e, call_scode(call));
+            if (established && !e->stopping && !e->audio_mode &&
+                !e->dialogs[0].call && !e->dialogs[1].call)
+                play_hangup_tone(e);
         }
         break;
     case BEVENT_CALL_REMOTE_SDP:

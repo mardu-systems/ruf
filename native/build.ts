@@ -183,6 +183,7 @@ if (windows && !openssl) {
     `--x-manifest-root=${join(root, "native")}`,
     `--x-install-root=${installed}`,
     `--triplet=${windowsTriplet}`,
+    `--overlay-ports=${join(root, "native/vcpkg-ports")}`,
   ]);
   openssl = join(installed, windowsTriplet);
 }

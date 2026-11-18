@@ -2,6 +2,7 @@ import type { Plugin } from "vite";
 import type { SoftwareBill, SoftwareBuild } from "../src/lib/software-bill.js";
 import { command, read, root, runtime, sha256 } from "./sbom-runtime.js";
 import { addFrontend } from "./software-bill-frontend.js";
+import windowsOpenSsl from "../../../native/vcpkg-ports/openssl/vcpkg.json";
 
 interface CargoPackage {
   id: string;
@@ -170,6 +171,22 @@ export async function createSoftwareBill(
       ...(pkg.source ? { purl: ref(pkg) } : {}),
       scope: required ? "required" : "excluded",
       ...(pkg.license ? { licenses: [{ expression: pkg.license }] } : {}),
+      ...(pkg.name === "glib" && pkg.source === null
+        ? {
+            properties: [
+              {
+                name: "ruf:patch:sha256",
+                value: sha256(await read("vendor/glib/src/variant_iter.rs")),
+              },
+              {
+                name: "ruf:patch:upstream",
+                value:
+                  "https://github.com/gtk-rs/gtk-rs-core/commit/b5a4071e439bef2b5eea76c3aa25e5ae84839e34",
+              },
+              { name: "ruf:patch:advisory", value: "RUSTSEC-2024-0429" },
+            ],
+          }
+        : {}),
     });
   }
   if (context.native) {
@@ -232,6 +249,16 @@ export function addNative(
   context: SoftwareBuild,
   sdk: NativeSdk,
 ): void {
+  if (context.target.includes("windows")) {
+    const patch = /^3\.5\.(\d+)$/.exec(sdk.openssl?.version ?? "");
+    if (
+      !patch ||
+      Number(patch[1]) < Number(windowsOpenSsl.version.split(".")[2])
+    )
+      throw new Error(
+        `Windows SDK requires OpenSSL ${windowsOpenSsl.version} or newer in the maintained 3.5 LTS series; rebuild the native SDK.`,
+      );
+  }
   if (
     !context.native ||
     sdk.target !== context.target ||

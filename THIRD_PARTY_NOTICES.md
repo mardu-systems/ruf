@@ -93,7 +93,7 @@ Opaque offer tokens use `getrandom` 0.4.3. These Rust crates are used under thei
 MIT license option; their unmodified notices are staged in `native/licenses/`.
 The operating-system frameworks are platform components, not copied source.
 
-Local call history uses rusqlite 0.41.1 and libsqlite3-sys 0.39.1 under MIT.
+Local call history uses rusqlite 0.43.0 and libsqlite3-sys 0.40.0 under MIT.
 Their unmodified upstream notices are bundled in `native/licenses/`. The bundled
 SQLite engine is dedicated to the public domain by its authors; see the notice
 in the bundled sqlite3 source and [SQLite copyright](https://sqlite.org/copyright.html).
@@ -102,6 +102,11 @@ Linux Secret Service integration directly uses secret-service 5.2.0 (MIT option)
 and zbus 5.19.0 (MIT), already resolved in the Cargo dependency graph. Desktop
 clipboard integration reuses gtk 0.18.2 (MIT) on Tauri's GTK main loop. Their
 unmodified notices are included in `native/licenses/` and desktop resources.
+GLib 0.18.5 (MIT) is included as a source backport of the upstream
+`VariantStrIter` mutability fix for RUSTSEC-2024-0429; see
+[vendor provenance](vendor/README.md). Its original notice is bundled as
+`glib-0.18.5-LICENSE-MIT`. The Windows OpenSSL build also carries the MIT-licensed
+[vcpkg LTS port recipe](native/vcpkg-ports/README.md); OpenSSL remains Apache-2.0.
 The Linux baresip module uses the system libpulse client library, licensed under
 LGPL-2.1-or-later; its license text is included as `libpulse-LGPL-2.1`. Linux
 distribution libraries (including GTK/WebKitGTK and PulseAudio) retain their

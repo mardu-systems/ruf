@@ -5,7 +5,10 @@ use phone_core::{
     HistoryEntry, HistoryFilter, HistoryPage, HistoryPreferences, HistoryQuery, ObservedCallEvent,
     ObservedCallKind, PhoneError, RegistrationState, contact_dial_target, contact_match_key,
 };
-use std::sync::{Arc, Mutex, mpsc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex, mpsc},
+};
 use tauri::{Emitter, Manager};
 
 mod database;
@@ -50,7 +53,7 @@ fn callback_account(entry: &HistoryEntry, accounts: &[AccountSnapshot]) -> Optio
 }
 
 fn project_page(
-    entries: Vec<HistoryEntry>,
+    entries: impl IntoIterator<Item = Result<HistoryEntry, PhoneError>>,
     query: &HistoryQuery,
     contacts: &[Contact],
     accounts: &[AccountSnapshot],
@@ -59,52 +62,80 @@ fn project_page(
 ) -> Result<HistoryPage, PhoneError> {
     validate_query(query)?;
     let search = query.search.trim().to_lowercase();
-    let numbers: Vec<String> = query
+    let numbers: HashSet<String> = query
         .contact_numbers
         .iter()
         .filter_map(|n| phone_core::contact_match_key_with_preferences(n, preferences))
         .collect();
-    let entries: Vec<HistoryEntry> = entries
-        .into_iter()
-        .filter_map(|mut entry| {
-            if !numbers.is_empty()
-                && !entry
-                    .number
-                    .as_deref()
-                    .and_then(|n| phone_core::contact_match_key_with_preferences(n, preferences))
-                    .is_some_and(|key| numbers.contains(&key))
+    // Index only currently authorized contacts. Conflicting source/ID ownership
+    // stays unresolved, including regional aliases and repeated phone numbers.
+    let mut owners: HashMap<String, Option<&Contact>> = HashMap::new();
+    for contact in contacts {
+        for phone in &contact.phones {
+            if let Some(key) =
+                phone_core::contact_match_key_with_preferences(&phone.number, preferences)
             {
-                return None;
+                owners
+                    .entry(key)
+                    .and_modify(|owner| {
+                        if owner
+                            .is_some_and(|old| old.id != contact.id || old.source != contact.source)
+                        {
+                            *owner = None;
+                        }
+                    })
+                    .or_insert(Some(contact));
             }
-            entry.contact = entry.number.as_deref().and_then(|number| {
-                phone_core::resolve_contact_with_preferences(contacts, number, preferences)
+        }
+    }
+    let limit = query.limit.unwrap_or(50);
+    let mut page = Vec::with_capacity(limit as usize);
+    let mut total = 0_u32;
+    for entry in entries {
+        let mut entry = entry?;
+        let key = entry
+            .number
+            .as_deref()
+            .and_then(|n| phone_core::contact_match_key_with_preferences(n, preferences));
+        if !numbers.is_empty() && !key.as_ref().is_some_and(|key| numbers.contains(key)) {
+            continue;
+        }
+        let contact = key
+            .as_ref()
+            .and_then(|key| owners.get(key))
+            .copied()
+            .flatten();
+        let matches = search.is_empty()
+            || [
+                Some(entry.account_name.as_str()),
+                entry.account_registrar.as_deref(),
+                entry.account_username.as_deref(),
+                entry.number.as_deref(),
+                entry.remote_name.as_deref(),
+                contact.map(|contact| contact.name.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|text| text.to_lowercase().contains(&search));
+        if !matches {
+            continue;
+        }
+        let position = total;
+        total = total.checked_add(1).ok_or_else(storage_error)?;
+        if position >= query.offset && page.len() < limit as usize {
+            entry.contact = contact.map(|contact| phone_core::ContactReference {
+                id: contact.id.clone(),
+                source: contact.source,
+                name: contact.name.clone(),
             });
             entry.callback_account_id = callback_account(&entry, accounts);
-            let matches = search.is_empty()
-                || [
-                    Some(entry.account_name.as_str()),
-                    entry.account_registrar.as_deref(),
-                    entry.account_username.as_deref(),
-                    entry.number.as_deref(),
-                    entry.remote_name.as_deref(),
-                    entry.contact.as_ref().map(|contact| contact.name.as_str()),
-                ]
-                .into_iter()
-                .flatten()
-                .any(|text| text.to_lowercase().contains(&search));
-            matches.then_some(entry)
-        })
-        .collect();
-    let total = u32::try_from(entries.len()).map_err(|_| storage_error())?;
-    let limit = query.limit.unwrap_or(50) as usize;
+            page.push(entry);
+        }
+    }
     let has_more =
         u64::from(query.offset) + u64::from(query.limit.unwrap_or(50)) < u64::from(total);
     Ok(HistoryPage {
-        entries: entries
-            .into_iter()
-            .skip(query.offset as usize)
-            .take(limit)
-            .collect(),
+        entries: page,
         total,
         has_more,
         recording_error,
@@ -142,8 +173,13 @@ impl RecordingPolicy {
 type Reply<T> = mpsc::Sender<Result<T, PhoneError>>;
 enum Message {
     Observe(Box<ObservedCallEvent>),
-    Entries(HistoryFilter, Reply<Vec<HistoryEntry>>),
-    Page(HistoryFilter, u32, u32, Reply<(Vec<HistoryEntry>, u32)>),
+    Page {
+        query: HistoryQuery,
+        contacts: Vec<Contact>,
+        accounts: Vec<AccountSnapshot>,
+        preferences: phone_core::ContactsPreferences,
+        reply: Reply<HistoryPage>,
+    },
     Entry(String, Reply<HistoryEntry>),
     Delete(String, Reply<()>),
     Clear(Reply<()>),
@@ -240,24 +276,17 @@ fn worker(
                     changed = true;
                 }
             },
-            Message::Entries(filter, reply) => {
+            Message::Page {
+                query,
+                contacts,
+                accounts,
+                preferences,
+                reply,
+            } => {
                 let result = database
                     .as_ref()
                     .map_err(|_| storage_error())
-                    .and_then(|db| db.entries(filter));
-                if result
-                    .as_ref()
-                    .is_err_and(|e| e.code == ErrorCode::StorageFailure)
-                {
-                    mark_error(&error);
-                }
-                let _ = reply.send(result);
-            }
-            Message::Page(filter, offset, limit, reply) => {
-                let result = database
-                    .as_ref()
-                    .map_err(|_| storage_error())
-                    .and_then(|db| db.page(filter, offset, limit));
+                    .and_then(|db| db.query_page(&query, &contacts, &accounts, &preferences));
                 if result
                     .as_ref()
                     .is_err_and(|e| e.code == ErrorCode::StorageFailure)
@@ -466,33 +495,15 @@ pub(crate) async fn get_history(
         let accounts =
             phone.with(|session| session.snapshot().map(|snapshot| snapshot.accounts))?;
         let contacts = crate::contacts::cached_contacts(&app);
-        if query.search.trim().is_empty() && query.contact_numbers.is_empty() {
-            let limit = query.limit.unwrap_or(50);
-            let (entries, total) =
-                history.request(|reply| Message::Page(query.filter, query.offset, limit, reply))?;
-            let has_more = u64::from(query.offset) + u64::from(limit) < u64::from(total);
-            let mut page = project_page(
-                entries,
-                &HistoryQuery { offset: 0, ..query },
-                &contacts,
-                &accounts,
-                recording_error(&app),
-                &crate::contacts::matching_preferences(&app),
-            )?;
-            page.total = total;
-            page.has_more = has_more;
-            Ok(page)
-        } else {
-            let entries = history.request(|reply| Message::Entries(query.filter, reply))?;
-            project_page(
-                entries,
-                &query,
-                &contacts,
-                &accounts,
-                recording_error(&app),
-                &crate::contacts::matching_preferences(&app),
-            )
-        }
+        let mut page = history.request(|reply| Message::Page {
+            query,
+            contacts,
+            accounts,
+            preferences: crate::contacts::matching_preferences(&app),
+            reply,
+        })?;
+        page.recording_error = recording_error(&app);
+        Ok(page)
     })
     .await
     .map_err(|_| storage_error())?
@@ -650,6 +661,85 @@ mod query_tests {
         assert_eq!(callback_account(&hidden, &[account()]), None);
     }
     #[test]
+    fn search_streams_rows_with_exact_totals_and_propagates_late_storage_errors() {
+        let query = HistoryQuery {
+            search: "literal".into(),
+            offset: 91,
+            limit: Some(7),
+            ..Default::default()
+        };
+        let rows = (0..1000).map(|id| {
+            let mut row = entry();
+            row.id = id.to_string();
+            if id % 2 == 1 {
+                row.remote_name = None;
+            }
+            Ok(row)
+        });
+        let page = project_page(rows, &query, &[], &[], None, &Default::default()).unwrap();
+        assert_eq!(page.total, 500);
+        assert!(page.has_more);
+        assert_eq!(page.entries.len(), 7);
+        assert_eq!(page.entries[0].id, "182");
+        assert_eq!(page.entries[6].id, "194");
+
+        let rows = std::iter::once(Ok(entry())).chain(std::iter::once(Err(storage_error())));
+        assert_eq!(
+            project_page(
+                rows,
+                &HistoryQuery {
+                    limit: Some(1),
+                    ..query
+                },
+                &[],
+                &[],
+                None,
+                &Default::default()
+            )
+            .unwrap_err()
+            .code,
+            ErrorCode::StorageFailure
+        );
+    }
+    #[test]
+    fn indexed_names_match_the_canonical_resolver_including_ambiguous_aliases() {
+        let preferences = phone_core::ContactsPreferences {
+            match_german_numbers: true,
+            ..Default::default()
+        };
+        let mut first = contact();
+        first.phones[0].number = "030 1234567".into();
+        first.phones.push(first.phones[0].clone());
+        let mut duplicate = first.clone();
+        duplicate.name = "Same identity, later spelling".into();
+        let mut other = first.clone();
+        other.id = "another-owner".into();
+        other.phones[0].number = "+49 30 1234567".into();
+        for contacts in [
+            vec![first.clone()],
+            vec![first.clone(), duplicate.clone()],
+            vec![first.clone(), duplicate, other],
+        ] {
+            let mut row = entry();
+            row.number = Some("0049 30 1234567".into());
+            let expected = phone_core::resolve_contact_with_preferences(
+                &contacts,
+                row.number.as_deref().unwrap(),
+                &preferences,
+            );
+            let page = project_page(
+                std::iter::once(Ok(row)),
+                &HistoryQuery::default(),
+                &contacts,
+                &[],
+                None,
+                &preferences,
+            )
+            .unwrap();
+            assert_eq!(page.entries[0].contact, expected);
+        }
+    }
+    #[test]
     fn literal_search_current_contact_names_contact_scope_and_paging() {
         let mut second = entry();
         second.id = "older".into();
@@ -663,7 +753,7 @@ mod query_tests {
         };
         assert_eq!(
             project_page(
-                rows.clone(),
+                rows.clone().into_iter().map(Ok),
                 &query,
                 &contacts,
                 &[account()],
@@ -679,7 +769,7 @@ mod query_tests {
             ..Default::default()
         };
         let page = project_page(
-            rows.clone(),
+            rows.clone().into_iter().map(Ok),
             &query,
             &contacts,
             &[account()],
@@ -692,7 +782,7 @@ mod query_tests {
         assert_eq!(page.entries[0].callback_account_id, Some(7));
         assert_eq!(
             project_page(
-                rows.clone(),
+                rows.clone().into_iter().map(Ok),
                 &query,
                 &[],
                 &[account()],
@@ -709,7 +799,7 @@ mod query_tests {
         };
         assert_eq!(
             project_page(
-                rows.clone(),
+                rows.clone().into_iter().map(Ok),
                 &query,
                 &contacts,
                 &[],
@@ -725,7 +815,7 @@ mod query_tests {
             ..Default::default()
         };
         let page = project_page(
-            rows.clone(),
+            rows.clone().into_iter().map(Ok),
             &query,
             &contacts,
             &[],
@@ -737,7 +827,7 @@ mod query_tests {
         assert_eq!(page.total, 2);
         let query = HistoryQuery { offset: 1, ..query };
         let page = project_page(
-            rows,
+            rows.into_iter().map(Ok),
             &query,
             &[],
             &[],

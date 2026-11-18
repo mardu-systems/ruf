@@ -60,6 +60,16 @@ return `storageFailure`; a prior write failure also remains visible through
 `recordingError` and engine snapshot `historyError` until application restart.
 Telephony continues independently of history storage availability.
 
+Searches build one transient index of currently authorized contact numbers and
+stream stored rows in newest-first order. Only the requested matching page is
+retained; `total` and `hasMore` still describe all matches. Searches therefore
+still scan relevant history rows to compute exact totals, but do not retain the
+whole result or rescan all contacts for each call. The existing ordered database
+worker owns this scan; native SIP callbacks continue only to enqueue facts.
+No contact name or matching index is persisted. Literal Unicode search, regional
+matching preferences, ambiguous-contact rejection and all validation/error
+contracts above are unchanged.
+
 ### `delete_history_entry { id } → null`
 
 `id` is a required history ID. Unknown IDs return `invalidInput`. An ongoing

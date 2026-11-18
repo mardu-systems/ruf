@@ -53,7 +53,7 @@ See [Linux desktop prerequisites and acceptance](../docs/linux.md). Cross compil
 Desktop CI caches only `native/install/<target>/`, including the SDK's NAT test
 executable. An exact key covers the runner image, compiler/CMake identity, source
 pins, all SDK build scripts and patches, vcpkg baseline and the macOS OpenSSL
-recipe. There is no fallback to a partially matching key. The cache is saved
+recipe, including the Windows OpenSSL overlay. There is no fallback to a partially matching key. The cache is saved
 after the SDK build and its NAT tests succeed, before application checks, so a
 later application failure does not discard the qualified SDK.
 
@@ -87,10 +87,16 @@ branch caches. See
   Studio ARM64 C++ tools and a native ARM64 Bun/Rust toolchain; x64 remains x64.
   The SDK fetches the exact manifest baseline into that checkout if an older
   runner image lacks it; it does not switch the checkout or advance the pin.
+  The [tracked LTS overlay](vcpkg-ports/README.md) supplies OpenSSL 3.5.9 because
+  the registry's 3.6 port is no longer in a maintained upstream series.
 - Linux: CMake, GCC/Clang, pkg-config and OpenSSL development/static libraries
   (`sudo apt-get install cmake libssl-dev libpulse-dev pkg-config` on Ubuntu).
 
 `OPENSSL_ROOT_DIR` can select a compatible static OpenSSL installation explicitly.
+On Windows this must be OpenSSL 3.5 LTS at least as new as the tracked overlay
+(currently 3.5.9). Discovery, adapter compilation and SDK/SBOM reuse reject older
+patches, unsupported series and malformed versions with a rebuild diagnostic.
+This preserves the existing static-MD/runtime and Windows trust-validation paths.
 The generated SDK manifest records resolved OpenSSL version/prefix, source pins,
 target and modules. Source pins are reproducible; host compiler and macOS/Linux
 OpenSSL packages remain external inputs, so this is not a bit reproducible build.

@@ -9,6 +9,8 @@ preload = ["./tests/ui/setup.ts"]
 
 [fmt]
 ignorePatterns = [
+  "vendor/glib/",
+  "native/vcpkg-ports/",
   "**/gen/",
   "apps/desktop/src/lib/generated/",
   "Cargo.lock",

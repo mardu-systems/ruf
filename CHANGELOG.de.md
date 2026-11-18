@@ -1,8 +1,11 @@
 # Was ist neu in Ruf?
 
-## Unveröffentlicht · Entwicklungsstand
+## 0.2.0 · Vorschau
 
-- Baue den nativen Linux-Desktop für GNU x64 oder ARM64 als DEB-, RPM- oder AppImage-Paket. Die veröffentlichten 0.1.1-Installer enthalten diese Entwicklungsänderungen noch nicht.
+- Spiele einen kurzen lokalen Auflegeton ab, sobald das letzte verbundene Gespräch beendet ist.
+- Verarbeite Verlaufssuchen fortlaufend mit einem temporären Kontaktindex, übernimm die GLib-Korrektur für String-Iteratoren und baue Windows-OpenSSL über eine festgelegte, gepflegte LTS-Rezeptur. Lehne veraltete Windows-TLS-SDKs ab und dokumentiere den richtigen Rustup-Aufruf für macOS-Stripping.
+- Aktualisiere Rust, Tauri, SQLite, Übersetzung, Frontend-Werkzeuge und festgelegte CI-/Labor-Abhängigkeiten. Stelle inkompatible Hauptversionen zurück; das Dependency-Review dokumentiert verbleibende Wartungs- und OpenSSL-Supportlücken der Abhängigkeiten.
+- Baue den nativen Linux-Desktop für GNU x64 oder ARM64 als DEB-, RPM- oder AppImage-Paket.
 - Nutze unter Linux Secret Service für verschlüsselt gespeicherte Kontopasswörter, Desktop-Mitteilungen mit Annehmen/Ablehnen, Tray-/Hintergrundbetrieb und Autostart der installierten App.
 - Wähle unter Linux Mikrofon, Gesprächs- und Klingelton-Ausgabe getrennt über PulseAudio oder pipewire-pulse. Feste Routen bleiben am gewählten Gerät; nach Freigabe fehlgeschlagener Vorgänge und Rückkehr des Geräts oder Audioservers funktionieren neue Tests und Anrufe wieder.
 - Beobachte bis zu 32 Nebenstellen pro Konto über natives SIP-BLF. Zeige unbekannt, frei, klingelnd und besetzt an; die Telefonanlage muss Dialog-Abonnements unterstützen und erlauben.

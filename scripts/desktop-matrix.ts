@@ -9,6 +9,7 @@ interface DesktopTarget {
   artifact: string;
   "openssl-cache-path": string;
   "openssl-recipe": string;
+  "openssl-overlay"?: string;
   "openssl-prefix"?: string;
   "extra-evidence"?: string;
 }
@@ -42,6 +43,7 @@ const targets: DesktopTarget[] = [
     artifact: "target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe",
     "openssl-cache-path": "native/build/x86_64-pc-windows-msvc/vcpkg",
     "openssl-recipe": "native/vcpkg.*",
+    "openssl-overlay": "native/vcpkg-ports/**",
   },
   {
     runner: "windows-11-arm",
@@ -51,6 +53,7 @@ const targets: DesktopTarget[] = [
     artifact: "target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe",
     "openssl-cache-path": "native/build/aarch64-pc-windows-msvc/vcpkg",
     "openssl-recipe": "native/vcpkg.*",
+    "openssl-overlay": "native/vcpkg-ports/**",
   },
   {
     runner: "ubuntu-22.04",

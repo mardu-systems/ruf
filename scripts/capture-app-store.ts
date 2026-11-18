@@ -18,7 +18,7 @@ const output = join(root, "artifacts/app-store/screenshots");
 const temporary = mkdtempSync(join(tmpdir(), "ruf-app-store-"));
 const cli = [
   "--package",
-  "@playwright/cli@0.1.23",
+  "@playwright/cli@0.1.24",
   "playwright-cli",
   `-s=ruf-store-${process.pid}`,
 ];

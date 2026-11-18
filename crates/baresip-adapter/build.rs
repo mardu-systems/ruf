@@ -142,6 +142,29 @@ fn build_telephony() {
             "Native SDK needs coreaudio; run bun run native:build"
         );
     }
+    if target.contains("windows") {
+        let recipe = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../native/vcpkg-ports/openssl/vcpkg.json");
+        println!("cargo:rerun-if-changed={}", recipe.display());
+        let recipe: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(recipe).expect("OpenSSL recipe"))
+                .expect("OpenSSL recipe JSON");
+        let minimum = recipe["version"].as_str().expect("OpenSSL recipe version");
+        let minimum_patch: u32 = minimum
+            .strip_prefix("3.5.")
+            .expect("OpenSSL LTS series")
+            .parse()
+            .expect("OpenSSL patch");
+        assert!(
+            manifest["openssl"]["version"]
+                .as_str()
+                .and_then(|v| v.strip_prefix("3.5."))
+                .filter(|patch| !patch.is_empty() && patch.bytes().all(|byte| byte.is_ascii_digit()))
+                .and_then(|patch| patch.parse::<u32>().ok())
+                .is_some_and(|patch| patch >= minimum_patch),
+            "Windows SDK requires OpenSSL {minimum} or newer in the maintained 3.5 LTS series; run bun run native:build"
+        );
+    }
     assert!(
         manifest["modules"]
             .as_array()
