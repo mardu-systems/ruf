@@ -1,7 +1,5 @@
 # Was ist neu in Ruf?
 
-## Unveröffentlicht · Entwicklungsstand
-
 ## 0.2.0 · Vorschau
 
 - Spiele einen kurzen lokalen Auflegeton ab, sobald das letzte verbundene Gespräch beendet ist.

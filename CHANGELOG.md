@@ -1,7 +1,5 @@
 # What's new in Ruf?
 
-## Unreleased · Development
-
 ## 0.2.0 · Preview
 
 - Play a short local tone when the last connected call has ended.
