@@ -67,6 +67,15 @@ license option. Their upstream MIT notices are included in `native/licenses/`
 and bundled with the desktop application's existing license resources. Other
 transitive Rust components retain the licenses recorded in their packages.
 
+Regional contact number lookup uses
+[phonenumber](https://github.com/whisperfish/rust-phonenumber) in Rust and
+[libphonenumber-js](https://github.com/catamphetamine/libphonenumber-js) in
+the frontend. Both use numbering plan data from
+[Google libphonenumber](https://github.com/google/libphonenumber).
+The bundled [Apache 2.0 notice](native/licenses/phonenumber-0.3.10-LICENSE-APACHE)
+and [MIT notice](native/licenses/libphonenumber-js-1.13.17-LICENSE-MIT)
+are available with other dependency licenses in Ruf.
+
 The interface bundles unmodified IBM Plex Sans Regular and SemiBold from
 [Zed's font assets](https://github.com/zed-industries/zed/tree/e21ff1b368b074586e4dae0d9bbf15d5dd8a1476/assets/fonts/ibm-plex-sans).
 Copyright © 2017 IBM Corp., Reserved Font Name "Plex". The fonts use the

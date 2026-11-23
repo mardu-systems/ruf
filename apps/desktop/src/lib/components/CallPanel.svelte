@@ -12,7 +12,7 @@
   } from "../generated/AppInfo";
   import { errorMessage } from "../api";
   import { getContacts } from "../contacts-api";
-  import { searchContacts } from "../contacts";
+  import { defaultNumberRegion, searchContacts } from "../contacts";
   import DtmfPad from "./DtmfPad.svelte";
   import { normalizeDialNumber } from "../dialing";
   import Icon from "./Icon.svelte";
@@ -30,7 +30,7 @@
     testAudio = false,
     audioUnknown = false,
     receivedDtmf = null,
-    matchGermanNumbers = true,
+    numberRegion = defaultNumberRegion,
     onsenddtmf = () => {},
     onanswer,
     onhangup,
@@ -52,7 +52,7 @@
     testAudio?: boolean;
     audioUnknown?: boolean;
     receivedDtmf?: string | null;
-    matchGermanNumbers?: boolean;
+    numberRegion?: string | null;
     onsenddtmf?: (id: string, digit: string) => void;
     onanswer: (id: string) => void;
     onhangup: (id: string) => void;
@@ -172,7 +172,7 @@
       query,
       false,
       true,
-      matchGermanNumbers,
+      numberRegion,
       $locale,
     ).slice(0, 30),
   );

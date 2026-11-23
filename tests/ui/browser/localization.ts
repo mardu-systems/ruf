@@ -45,6 +45,7 @@ export default async function localizationRegressions(
       favoritesFirst: true,
       showOrganization: true,
       matchGermanNumbers: true,
+      numberRegion: "DE",
     },
     history: { recordingEnabled: true, retentionDays: null },
   };

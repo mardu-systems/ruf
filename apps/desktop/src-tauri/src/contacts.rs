@@ -1,7 +1,8 @@
 //! Read-only system contacts and app-local favorite identifiers.
 
 use phone_core::{
-    Contact, ContactsPermission, ContactsSnapshot, EngineSnapshot, ErrorCode, PhoneError,
+    Contact, ContactsPermission, ContactsPreferences, ContactsSnapshot, EngineSnapshot, ErrorCode,
+    PhoneError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,7 +23,7 @@ pub(crate) struct ContactsState {
     cache: Arc<RwLock<Option<ContactsSnapshot>>>,
     error: Arc<RwLock<Option<PhoneError>>>,
     stopped: Arc<AtomicBool>,
-    match_german_numbers: Arc<AtomicBool>,
+    matching: Arc<RwLock<Option<ContactsPreferences>>>,
 }
 
 /// Authorized in-memory records only; source names/numbers are never persisted.
@@ -58,7 +59,7 @@ pub(crate) fn enrich_snapshot(app: &tauri::AppHandle, snapshot: &mut EngineSnaps
 fn project_contacts(
     snapshot: &mut EngineSnapshot,
     contacts: &[Contact],
-    preferences: &phone_core::ContactsPreferences,
+    preferences: &ContactsPreferences,
 ) {
     for call in &mut snapshot.calls {
         let number = call
@@ -75,23 +76,31 @@ fn project_contacts(
         .and_then(|c| c.contact.clone());
 }
 
-pub(crate) fn matching_preferences(app: &tauri::AppHandle) -> phone_core::ContactsPreferences {
-    phone_core::ContactsPreferences {
-        match_german_numbers: app
-            .state::<ContactsState>()
-            .match_german_numbers
-            .load(Ordering::Acquire),
-        ..Default::default()
-    }
+pub(crate) fn matching_preferences(app: &tauri::AppHandle) -> ContactsPreferences {
+    app.state::<ContactsState>()
+        .matching
+        .read()
+        .ok()
+        .and_then(|preferences| preferences.clone())
+        .unwrap_or_else(|| ContactsPreferences {
+            match_german_numbers: false,
+            ..Default::default()
+        })
 }
 
-pub(crate) fn update_matching(app: &tauri::AppHandle, enabled: bool) {
-    if app
-        .state::<ContactsState>()
-        .match_german_numbers
-        .swap(enabled, Ordering::AcqRel)
-        != enabled
-    {
+pub(crate) fn update_matching(app: &tauri::AppHandle, preferences: ContactsPreferences) {
+    let state = app.state::<ContactsState>();
+    let changed = if let Ok(mut current) = state.matching.write() {
+        if current.as_ref() == Some(&preferences) {
+            false
+        } else {
+            *current = Some(preferences);
+            true
+        }
+    } else {
+        false
+    };
+    if changed {
         let _ = app.emit("contacts-changed", ());
     }
 }
@@ -135,17 +144,16 @@ fn publish(
 
 /// Subscribe to native revision changes; permission checks never request access.
 pub(crate) fn setup(app: &tauri::AppHandle) {
-    let enabled = crate::store::data_directory(app)
+    let settings = crate::store::data_directory(app).ok().and_then(|dir| {
+        crate::store::AccountStore {
+            path: dir.join("accounts.json"),
+        }
+        .load()
         .ok()
-        .and_then(|dir| {
-            crate::store::AccountStore {
-                path: dir.join("accounts.json"),
-            }
-            .load()
-            .ok()
-        })
-        .is_some_and(|s| s.preferences.contacts.match_german_numbers);
-    update_matching(app, enabled);
+    });
+    if let Some(settings) = settings {
+        update_matching(app, settings.preferences.contacts);
+    }
     let app = app.clone();
     let state = app.state::<ContactsState>().inner().clone();
     std::thread::spawn(move || {

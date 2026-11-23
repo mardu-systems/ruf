@@ -53,6 +53,7 @@
   import AudioDiagnostics from "./lib/components/AudioDiagnostics.svelte";
   import { settingsSections, searchSettings } from "./lib/settings-navigation";
   import Icon from "./lib/components/Icon.svelte";
+  import { defaultNumberRegion } from "./lib/contacts";
 
   type Section = SettingsSection;
   let section = $state<Section>("accounts");
@@ -97,6 +98,7 @@
       favoritesFirst: true,
       showOrganization: true,
       matchGermanNumbers: true,
+      numberRegion: defaultNumberRegion,
     },
     history: { recordingEnabled: true, retentionDays: null },
   });

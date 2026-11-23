@@ -45,13 +45,56 @@ test("dialer finds national/international choices and preserves ambiguous owners
   expect(dialSuggestions(contacts, "+49 30").map((x) => x.contact.id)).toEqual([
     "c",
   ]);
-  expect(dialSuggestions(contacts, "030123456", false)).toEqual([]);
+  expect(dialSuggestions(contacts, "030123456", null)).toEqual([]);
   expect(dialSuggestions(contacts, "12")).toEqual([]);
   expect(dialSuggestions(contacts, "call 030123456")).toEqual([]);
   const duplicate = { ...contacts[0], id: "other", name: "Anderer Kontakt" };
   expect(dialSuggestions([contacts[0], duplicate], "030123456")).toHaveLength(
     2,
   );
+});
+
+test("national numbers use the selected region for lookup and keep original dial targets", () => {
+  for (const [region, national, international, prefix, foreignRegion] of [
+    ["GB", "020 7946 0018", "+44 20 7946 0018", "020 794", "DE"],
+    ["US", "(202) 555-0101", "+1 202 555 0101", "202 555", "GB"],
+    ["IT", "02 3661 8300", "+39 02 3661 8300", "02 3661", "GB"],
+    ["AU", "02 9374 4000", "+61 2 9374 4000", "02 9374", "GB"],
+    ["TK", "3101", "+690 3101", "310", "GB"],
+  ] as const) {
+    const number = international.replaceAll(" ", "");
+    const phone = { label: "Work", number: international, destination: number };
+    const rows = [{ ...contacts[0], phones: [phone] }];
+    expect(searchContacts(rows, national, false, true, region)).toEqual(rows);
+    expect(dialSuggestions(rows, prefix, region)[0]?.phone).toEqual(phone);
+    expect(dialSuggestions(rows, national, foreignRegion)).toEqual([]);
+    expect(dialSuggestions(rows, national, null)).toEqual([]);
+    expect(
+      dialSuggestions(rows, number.replace("+", "00"), null)[0]?.phone,
+    ).toEqual(phone);
+    const regionalPhone = {
+      ...phone,
+      number: national,
+      destination: national.replace(/\D/g, ""),
+    };
+    const regionalRows = [{ ...contacts[0], phones: [regionalPhone] }];
+    expect(dialSuggestions(regionalRows, number, region)[0]?.phone).toEqual(
+      regionalPhone,
+    );
+  }
+});
+
+test("regional international dialing prefixes are kept literal", () => {
+  const phone = {
+    label: "Work",
+    number: "+44 20 7946 0018",
+    destination: "+442079460018",
+  };
+  const rows = [{ ...contacts[0], phones: [phone] }];
+  expect(
+    searchContacts(rows, "011 44 20 7946 0018", false, true, "US"),
+  ).toEqual([]);
+  expect(dialSuggestions(rows, "011 44 20 7946 0018", "US")).toEqual([]);
 });
 
 test("dial suggestions rank exact matches before favorites and deduplicate before limiting", () => {

@@ -100,6 +100,7 @@ export default async function layoutRegressions(
               favoritesFirst: true,
               showOrganization: true,
               matchGermanNumbers: true,
+              numberRegion: "DE",
             },
             history: { recordingEnabled: true, retentionDays: null },
           };

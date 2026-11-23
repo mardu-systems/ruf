@@ -196,11 +196,15 @@ const fields: LocalizedSettingResult[] = [
   },
   {
     section: "contacts",
-    target: "match-german-numbers",
-    label: message("navigation.match_german_dialing_prefixes"),
-    terms: message(
-      "navigation.country_code_germany_49_0049_number_contact_match",
-    ),
+    target: "match-national-numbers",
+    label: message("settings.match_national_numbers"),
+    terms: message("navigation.national_number_matching"),
+  },
+  {
+    section: "contacts",
+    target: "number-region",
+    label: message("settings.number_region"),
+    terms: message("navigation.number_region"),
   },
   {
     section: "contacts",

@@ -64,7 +64,7 @@ impl PhoneSession {
         &mut self,
         preferences: phone_core::AppPreferences,
     ) -> Result<(), PhoneError> {
-        preferences.history.validate()?;
+        preferences.validate()?;
         if self.stopped {
             return Err(PhoneError::new(
                 ErrorCode::InvalidState,

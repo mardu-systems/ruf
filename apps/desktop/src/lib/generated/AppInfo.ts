@@ -70,10 +70,14 @@ favoritesFirst: boolean,
  */
 showOrganization: boolean,
 /**
- * Match German national 0… numbers with +49…/0049… for identity display only.
- * Defaults to true; never rewrites the number used for dialing.
+ * Match national and international forms for identity display in the selected region.
+ * The legacy field name and true default are retained for stored preferences.
  */
-matchGermanNumbers: boolean, };
+matchGermanNumbers: boolean,
+/**
+ * Two-letter uppercase dialing region. Legacy preferences default to DE.
+ */
+numberRegion: string, };
 
 export type HistoryPreferences = {
 /**

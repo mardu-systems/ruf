@@ -113,7 +113,6 @@ impl AccountStore {
         settings.sound.validate().map_err(|_| storage_error())?;
         settings
             .preferences
-            .history
             .validate()
             .map_err(|_| storage_error())?;
         if !matches!(settings.version, 1 | 2) || settings.accounts.len() > 8 {
@@ -165,7 +164,7 @@ impl AccountStore {
         Ok(settings)
     }
     pub fn write(&self, settings: &SavedSettings) -> Result<(), PhoneError> {
-        settings.preferences.history.validate()?;
+        settings.preferences.validate()?;
         let parent = self.path.parent().ok_or_else(storage_error)?;
         fs::create_dir_all(parent).map_err(|_| storage_error())?;
         // Preserve the exact original v1 bytes and fsync them before replacing metadata.
@@ -462,6 +461,37 @@ mod tests {
         store.write(&loaded).unwrap();
         assert_eq!(fs::read(&backup).unwrap(), original);
         assert_eq!(store.load().unwrap().version, 2);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn number_region_is_persisted_and_invalid_regions_do_not_replace_metadata() {
+        let directory =
+            std::env::temp_dir().join(format!("ruf-number-region-{}", std::process::id()));
+        let store = AccountStore {
+            path: directory.join("accounts.json"),
+        };
+        let saved: SavedSettings = serde_json::from_value(serde_json::json!({
+            "version": 2, "accounts": [], "selectedKey": null, "audioMode": "system",
+            "preferences": {
+                "startHidden": true, "showCallerInNotifications": false,
+                "contacts": {"favoritesFirst": true, "showOrganization": true, "numberRegion": "GB"},
+                "history": {"recordingEnabled": true}
+            }
+        }))
+        .unwrap();
+        store.write(&saved).unwrap();
+        let before = fs::read(&store.path).unwrap();
+        assert!(store.load().unwrap() == saved);
+
+        let mut invalid = serde_json::to_value(&saved).unwrap();
+        invalid["preferences"]["contacts"]["numberRegion"] = "ZZ".into();
+        let invalid: SavedSettings = serde_json::from_value(invalid).unwrap();
+        assert_eq!(
+            store.write(&invalid).unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+        assert_eq!(fs::read(&store.path).unwrap(), before);
         fs::remove_dir_all(directory).unwrap();
     }
 

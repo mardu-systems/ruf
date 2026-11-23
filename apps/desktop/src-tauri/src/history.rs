@@ -740,6 +740,43 @@ mod query_tests {
         }
     }
     #[test]
+    fn history_uses_the_selected_international_numbering_region() {
+        let preferences: phone_core::ContactsPreferences = serde_json::from_value(
+            serde_json::json!({"favoritesFirst": true, "showOrganization": true, "numberRegion": "GB"}),
+        )
+        .unwrap();
+        let mut contact = contact();
+        contact.phones[0].number = "020 7946 0958".into();
+        let mut row = entry();
+        row.number = Some("+442079460958".into());
+        let query = HistoryQuery {
+            contact_numbers: vec![contact.phones[0].number.clone()],
+            ..Default::default()
+        };
+        let page = project_page(
+            [Ok(row.clone())],
+            &query,
+            &[contact.clone()],
+            &[],
+            None,
+            &preferences,
+        )
+        .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.entries[0].number, row.number);
+        assert_eq!(page.entries[0].contact.as_ref().unwrap().id, contact.id);
+        let without_region = project_page(
+            [Ok(row)],
+            &query,
+            &[contact],
+            &[],
+            None,
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(without_region.total, 0);
+    }
+    #[test]
     fn literal_search_current_contact_names_contact_scope_and_paging() {
         let mut second = entry();
         second.id = "older".into();

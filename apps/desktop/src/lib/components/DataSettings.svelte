@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { t, text, message, type MessageValue } from "../i18n";
+  import { t, text, locale, message, type MessageValue } from "../i18n";
+  import { getCountries } from "libphonenumber-js/max";
   import type { AppPreferences } from "../generated/AppInfo";
   import { clearHistory } from "../history-api";
   import { errorMessage } from "../api";
+  import { defaultNumberRegion } from "../contacts";
   let {
     value = $bindable(),
     dirty,
@@ -21,6 +23,13 @@
   let confirmClear = $state(false),
     clearing = $state(false),
     feedback = $state<MessageValue>("");
+  const regions = $derived.by(() => {
+    const language = $locale;
+    const names = new Intl.DisplayNames(language, { type: "region" });
+    return getCountries()
+      .map((code) => ({ code, name: names.of(code) ?? code }))
+      .sort((a, b) => a.name.localeCompare(b.name, language));
+  });
   async function clear() {
     if (!confirmClear || clearing) return;
     clearing = true;
@@ -69,18 +78,37 @@
   </div>
   <div class="setting-row">
     <div class="setting-description">
-      <label for="match-german-numbers"
-        >{$t("settings.match_german_numbers")}</label
+      <label for="match-national-numbers"
+        >{$t("settings.match_national_numbers")}</label
       >
-      <p>
-        {$t("settings.match_german_numbers_help")}
+      <p id="match-national-numbers-help">
+        {$t("settings.match_national_numbers_help")}
       </p>
     </div>
     <input
-      id="match-german-numbers"
+      id="match-national-numbers"
       type="checkbox"
       bind:checked={value.contacts.matchGermanNumbers}
+      aria-describedby="match-national-numbers-help"
     />
+  </div>
+  <div class="setting-row">
+    <div class="setting-description">
+      <label for="number-region">{$t("settings.number_region")}</label>
+      <p id="number-region-help">{$t("settings.number_region_help")}</p>
+    </div>
+    <select
+      id="number-region"
+      value={value.contacts.numberRegion ?? defaultNumberRegion}
+      disabled={!value.contacts.matchGermanNumbers}
+      onchange={(event) =>
+        (value.contacts.numberRegion = event.currentTarget.value)}
+      aria-describedby="number-region-help"
+    >
+      {#each regions as region (region.code)}
+        <option value={region.code}>{region.name}</option>
+      {/each}
+    </select>
   </div>
   <h2 class="settings-group sound-group">{$t("settings.call_history")}</h2>
   <div class="setting-row">

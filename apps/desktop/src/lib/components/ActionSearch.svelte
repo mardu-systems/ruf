@@ -12,7 +12,7 @@
     HistoryEntry,
     HistoryPage,
   } from "../generated/AppInfo";
-  import { searchContacts } from "../contacts";
+  import { matchingNumberRegion, searchContacts } from "../contacts";
   import { getHistory } from "../history-api";
   import { normalizeDialNumber } from "../dialing";
   import { historyTitle, historyOutcomes } from "../history";
@@ -63,7 +63,7 @@
           text,
           false,
           preferences.favoritesFirst,
-          preferences.matchGermanNumbers,
+          matchingNumberRegion(preferences),
           $locale,
         )
       : [],

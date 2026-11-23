@@ -116,6 +116,7 @@ export default async function globalSearch(
               favoritesFirst: true,
               showOrganization: true,
               matchGermanNumbers: true,
+              numberRegion: "DE",
             },
             history: { recordingEnabled: true, retentionDays: null },
           };

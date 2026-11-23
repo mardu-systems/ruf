@@ -168,9 +168,11 @@ resolved from the authorized memory cache and selected dialog's native caller
 number or outgoing destination. It
 never modifies raw `caller` evidence. Matching removes supported visual separators
 and equates an explicit international `00` prefix to `+` for external-length
-numbers. The explicit `contacts.matchGermanNumbers` preference additionally
-equates German national numbers with +49 (see below). It preserves short
-extensions and service codes. It never uses suffix matches or matches names; withheld/unsupported/ambiguous
+numbers. The `contacts.matchGermanNumbers` preference additionally compares
+national numbers using the selected `contacts.numberRegion` numbering plan.
+Service codes and numbers that cannot be interpreted as complete numbers in
+that plan are compared literally. Caller recognition never uses suffix matches
+or matches names. Withheld, unsupported or ambiguous
 numbers return null. If two contacts own the same number, neither is asserted.
 The call panel and system notification prefer the matched current name and retain
 the original caller number. This is display convenience, not caller authentication.
@@ -224,13 +226,18 @@ additions are resolved again in current calls and old history rows. Denial,
 revocation or read failure clears the projection; withheld numbers are not resolved.
 Notifications use the same selected reference and preserve the anonymous setting.
 
-`contacts.matchGermanNumbers` defaults to true and can be disabled in
-Contacts & History. With this explicit setting, national numbers beginning with
-one 0 and at least seven dial characters match the corresponding +49/0049 form.
-Other countries, short extensions and service codes retain conservative exact
-matching. Multiple source contacts owning equivalent forms yield no identity.
-The conservative `resolve_contact` API remains unchanged; desktop projections use
-`resolve_contact_with_preferences` and its matching-key helper.
+`contacts.matchGermanNumbers` controls national/international lookup in
+Contacts & History. Its legacy name is retained. It defaults to true.
+`contacts.numberRegion` selects the numbering plan used for national numbers
+across Ruf. When omitted it defaults to Germany (`DE`), preserving the existing
+regional setting. The display language is independent. For example, with region
+`GB`, `020 7946 0958` and `+44 20 7946 0958` identify the same number.
+Explicit international numbers can still match across countries with the
+regional setting off. Multiple source contacts owning equivalent forms yield
+no identity. Lookup never rewrites a dialed number or the original contact and
+history data. The conservative `resolve_contact` API continues to compare
+original numbers and explicitly international spellings. Desktop projections
+use `resolve_contact_with_preferences` and its matching-key helper.
 
 ## Linux clipboard and contacts
 

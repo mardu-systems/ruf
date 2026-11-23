@@ -1,7 +1,24 @@
 import { getLocale } from "./i18n";
-import type { AppLocale } from "./generated/AppInfo";
+import { AsYouType, isSupportedCountry } from "libphonenumber-js/max";
 import { normalizeDialNumber } from "./dialing";
-import type { Contact, ContactPhone } from "./generated/AppInfo";
+import type {
+  AppLocale,
+  Contact,
+  ContactPhone,
+  ContactsPreferences,
+} from "./generated/AppInfo";
+
+export const defaultNumberRegion = "DE";
+
+/** Missing region metadata from older versions keeps the original German default. */
+export function matchingNumberRegion(
+  preferences: Pick<ContactsPreferences, "matchGermanNumbers"> &
+    Partial<Pick<ContactsPreferences, "numberRegion">>,
+): string | null {
+  return preferences.matchGermanNumbers === false
+    ? null
+    : (preferences.numberRegion ?? defaultNumberRegion);
+}
 
 function searchable(value: string): string {
   return value
@@ -23,13 +40,14 @@ export function searchContacts(
   query: string,
   favoritesOnly = false,
   favoritesFirst = true,
-  matchGermanNumbers = true,
+  numberRegion: string | null = defaultNumberRegion,
   language: AppLocale = getLocale(),
 ): Contact[] {
   const text = searchable(query.trim());
   const telephone = phoneSearch(text);
   const terms = text.split(/\s+/).filter(Boolean);
-  const queryKey = telephone ? numberPrefix(query, matchGermanNumbers) : null;
+  const dialQuery = telephone ? normalizeDialNumber(query) : null;
+  const queryKey = dialQuery ? numberKey(dialQuery, numberRegion, true) : null;
   return contacts
     .filter((contact) => {
       if (favoritesOnly && !contact.favorite) return false;
@@ -42,7 +60,8 @@ export function searchContacts(
           fields.includes(text) ||
           numbers.some((number) => number.includes(telephone)) ||
           contact.phones.some((phone) => {
-            const key = numberPrefix(phone.number, matchGermanNumbers);
+            const value = normalizeDialNumber(phone.number);
+            const key = value && numberKey(value, numberRegion);
             return !!key && !!queryKey && key.includes(queryKey);
           })
         );
@@ -60,15 +79,21 @@ export function searchContacts(
     );
 }
 
-/** Regional keys are only for lookup; never use them as a dial destination. */
-function numberPrefix(number: string, matchGerman: boolean): string | null {
-  const value = normalizeDialNumber(number);
-  if (!value) return null;
-  if (value.startsWith("00") && /^\d+$/.test(value) && value.length >= 4)
-    return `+${value.slice(2)}`;
-  if (matchGerman && /^0[1-9][0-9]+$/.test(value))
-    return `+49${value.slice(1)}`;
-  return value;
+/** Compare lookup keys while the actual dial destinations retain their source values. */
+function numberKey(
+  value: string,
+  region: string | null,
+  partial = false,
+): string {
+  if (!/^\d+$/.test(value)) return value;
+  if (value.startsWith("00"))
+    return value.length >= (partial ? 4 : 7) ? `+${value.slice(2)}` : value;
+  if (!region || !isSupportedCountry(region)) return value;
+
+  const parser = new AsYouType(region);
+  parser.input(value);
+  if (parser.isInternational() || (!partial && !parser.isValid())) return value;
+  return parser.getNumberValue() ?? value;
 }
 export interface DialSuggestion {
   contact: Contact;
@@ -78,18 +103,21 @@ export interface DialSuggestion {
 export function dialSuggestions(
   contacts: readonly Contact[],
   number: string,
-  matchGerman = true,
+  numberRegion: string | null = defaultNumberRegion,
   language: AppLocale = getLocale(),
 ): DialSuggestion[] {
-  const prefix = numberPrefix(number, matchGerman);
-  if (!prefix || number.replace(/\D/g, "").length < 3) return [];
+  const query = normalizeDialNumber(number);
+  if (!query || query.replace(/\D/g, "").length < 3) return [];
+  const prefix = numberKey(query, numberRegion, true);
   const candidates = contacts
     .flatMap((contact) =>
       contact.phones.flatMap((phone) => {
         if (!phone.destination) return [];
-        const key = numberPrefix(phone.number, matchGerman);
-        return key?.startsWith(prefix)
-          ? [{ contact, phone, exactMatch: key === prefix }]
+        const value = normalizeDialNumber(phone.number);
+        if (!value) return [];
+        const key = numberKey(value, numberRegion);
+        return value.startsWith(query) || key.startsWith(prefix)
+          ? [{ contact, phone, exactMatch: value === query || key === prefix }]
           : [];
       }),
     )

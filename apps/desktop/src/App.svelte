@@ -50,6 +50,7 @@
   import CallPanel from "./lib/components/CallPanel.svelte";
   import GettingStarted from "./lib/components/GettingStarted.svelte";
   import HistoryPanel from "./lib/components/HistoryPanel.svelte";
+  import { defaultNumberRegion, matchingNumberRegion } from "./lib/contacts";
   import { getContacts, refreshContacts } from "./lib/contacts-api";
   import { callbackHistory } from "./lib/history-api";
   import ContactsPanel from "./lib/components/ContactsPanel.svelte";
@@ -309,10 +310,9 @@
     favoritesFirst: true,
     showOrganization: true,
     matchGermanNumbers: true,
+    numberRegion: defaultNumberRegion,
   });
-  const matchGermanNumbers = $derived(
-    contactsPreferences.matchGermanNumbers ?? true,
-  );
+  const numberRegion = $derived(matchingNumberRegion(contactsPreferences));
   let dialContactsRequest = 0;
   async function refreshDialContacts(force = false) {
     if (browser) return;
@@ -948,7 +948,7 @@
             call={currentCall}
             calls={snapshot?.calls ?? []}
             callerContact={snapshot?.callerContact ?? null}
-            {matchGermanNumbers}
+            {numberRegion}
             accounts={snapshot?.accounts ?? []}
             elapsed={elapsedLabel}
             receivedDtmf={receivedDtmf?.kind === "dtmfStart"
@@ -1010,7 +1010,7 @@
           contacts={dialContacts?.permission === "authorized"
             ? dialContacts.contacts
             : []}
-          {matchGermanNumbers}
+          {numberRegion}
           {canCall}
           {busy}
           {registered}

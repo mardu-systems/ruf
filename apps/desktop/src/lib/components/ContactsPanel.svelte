@@ -16,7 +16,11 @@
     openContactsSettings,
   } from "../contacts-api";
   import { getPreferences } from "../api";
-  import { searchContacts } from "../contacts";
+  import {
+    defaultNumberRegion,
+    matchingNumberRegion,
+    searchContacts,
+  } from "../contacts";
   import Icon from "./Icon.svelte";
   import ContactRow from "./ContactRow.svelte";
 
@@ -43,6 +47,7 @@
     favoritesFirst: true,
     showOrganization: true,
     matchGermanNumbers: true,
+    numberRegion: defaultNumberRegion,
   });
   let preferencesError = $state<MessageValue | null>(null);
   let preferencesRequest = 0;
@@ -78,7 +83,7 @@
       query,
       favoritesOnly,
       preferences.favoritesFirst,
-      preferences.matchGermanNumbers,
+      matchingNumberRegion(preferences),
       $locale,
     ),
   );
@@ -140,7 +145,7 @@
         "",
         false,
         preferences.favoritesFirst,
-        preferences.matchGermanNumbers,
+        matchingNumberRegion(preferences),
         $locale,
       ).findIndex((contact) => contact.id === id);
       limit = Math.max(50, index + 1);

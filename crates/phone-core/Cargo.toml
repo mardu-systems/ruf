@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+phonenumber.workspace = true
 serde.workspace = true
 ts-rs.workspace = true
 

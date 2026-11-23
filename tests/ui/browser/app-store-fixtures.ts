@@ -225,6 +225,7 @@ export function installAppStoreFixtures(version = "0.1.1") {
             favoritesFirst: true,
             showOrganization: true,
             matchGermanNumbers: true,
+            numberRegion: "DE",
           },
           history: { recordingEnabled: true, retentionDays: null },
         };

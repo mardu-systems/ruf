@@ -126,6 +126,14 @@ impl Default for AppPreferences {
     }
 }
 
+impl AppPreferences {
+    /// Validate the local number matching and call-history policies.
+    pub fn validate(&self) -> Result<(), crate::PhoneError> {
+        self.contacts.validate()?;
+        self.history.validate()
+    }
+}
+
 /// Presentation preferences applied to existing contacts and favorites.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -134,21 +142,51 @@ pub struct ContactsPreferences {
     pub favorites_first: bool,
     /// Show organization text alongside contact names.
     pub show_organization: bool,
-    /// Match German national 0… numbers with +49…/0049… for identity display only.
-    /// Defaults to true; never rewrites the number used for dialing.
-    #[serde(default = "german_matching_default")]
+    /// Match national and international forms for identity display in the selected region.
+    /// The legacy field name and true default are retained for stored preferences.
+    #[serde(default = "national_matching_default")]
     pub match_german_numbers: bool,
+    /// Two-letter uppercase dialing region. Legacy preferences default to DE.
+    #[serde(default = "default_number_region")]
+    #[ts(optional = false)]
+    pub number_region: String,
 }
-fn german_matching_default() -> bool {
+fn national_matching_default() -> bool {
     true
 }
+
+fn default_number_region() -> String {
+    "DE".into()
+}
+
 impl Default for ContactsPreferences {
     fn default() -> Self {
         Self {
             favorites_first: true,
             show_organization: true,
             match_german_numbers: true,
+            number_region: default_number_region(),
         }
+    }
+}
+
+impl ContactsPreferences {
+    /// Reject regions without a supported numbering plan.
+    pub fn validate(&self) -> Result<(), crate::PhoneError> {
+        if self.dialing_region().is_none() {
+            return Err(crate::PhoneError::new(
+                crate::ErrorCode::InvalidInput,
+                "Select a supported country or region for national phone numbers.",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn dialing_region(&self) -> Option<phonenumber::country::Id> {
+        let region = self.number_region.parse().ok()?;
+        phonenumber::metadata::DATABASE
+            .by_id(self.number_region.as_str())
+            .map(|_| region)
     }
 }
 

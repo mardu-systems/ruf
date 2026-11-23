@@ -30,7 +30,7 @@ pub(crate) async fn save_preferences(
     confirm_history_deletion: Option<bool>,
 ) -> Result<AppPreferences, PhoneError> {
     tauri::async_runtime::spawn_blocking(move || {
-        preferences.history.validate()?;
+        preferences.validate()?;
         let _update = UPDATE.lock().map_err(|_| store::storage_error())?;
         let previous = with_session(&app, |session| Ok(session.preferences()))?;
         if previous.history == preferences.history {
@@ -59,7 +59,7 @@ pub(crate) async fn save_preferences(
                 return Err(error);
             }
         }
-        crate::contacts::update_matching(&app, preferences.contacts.match_german_numbers);
+        crate::contacts::update_matching(&app, preferences.contacts.clone());
         // Keep localization application ordered with full-object persistence.
         crate::localization::saved(&app, Ok(preferences))
     })

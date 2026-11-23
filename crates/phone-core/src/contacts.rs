@@ -136,9 +136,9 @@ pub fn resolve_contact(contacts: &[Contact], number: &str) -> Option<ContactRefe
     resolve_with_key(contacts, number, contact_match_key)
 }
 
-/// Comparison under the user's explicit regional preference. Only German external
-/// numbers gain a national/international alias; extensions, service codes and all
-/// other countries keep conservative exact matching. This never changes dialing.
+/// Use the selected numbering plan to match valid national forms against their
+/// international aliases. Unrecognized numbers and service codes retain the
+/// conservative key. This never changes dialing.
 #[must_use]
 pub fn contact_match_key_with_preferences(
     number: &str,
@@ -146,15 +146,15 @@ pub fn contact_match_key_with_preferences(
 ) -> Option<String> {
     let key = contact_match_key(number)?;
     if preferences.match_german_numbers
-        && key.len() >= 7
-        && key.starts_with('0')
-        && !key.starts_with("00")
-        && key.bytes().all(|c| c.is_ascii_digit())
+        && key.bytes().all(|digit| digit.is_ascii_digit())
+        && let Some(region) = preferences.dialing_region()
+        && let Ok(parsed) = phonenumber::parse(Some(region), &key)
+        && parsed.code().source() != phonenumber::country::Source::Idd
+        && phonenumber::is_valid(&parsed)
     {
-        Some(format!("+49{}", &key[1..]))
-    } else {
-        Some(key)
+        return Some(parsed.format().mode(phonenumber::Mode::E164).to_string());
     }
+    Some(key)
 }
 
 /// Resolve current authorized contact identity with regional aliases, rejecting

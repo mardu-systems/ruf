@@ -88,8 +88,13 @@ export type FixtureResult = { name: string; passed: boolean; error?: string };
 type Deferred = (() => void) | null;
 type RejectDeferred = ((reason: unknown) => void) | null;
 type FixturePreferences = Omit<AppPreferences, "contacts"> & {
-  contacts: Omit<AppPreferences["contacts"], "matchGermanNumbers"> &
-    Partial<Pick<AppPreferences["contacts"], "matchGermanNumbers">>;
+  contacts: Omit<
+    AppPreferences["contacts"],
+    "matchGermanNumbers" | "numberRegion"
+  > &
+    Partial<
+      Pick<AppPreferences["contacts"], "matchGermanNumbers" | "numberRegion">
+    >;
 };
 type Commands = { commands: FixtureCommand[] };
 interface PhoneFixture extends Commands {

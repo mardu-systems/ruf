@@ -2,7 +2,7 @@
   import { t, text, locale, type MessageValue } from "../i18n";
   import { onMount, tick, type Snippet } from "svelte";
   import { insertDigit, removeDigit, MAX_NUMBER_LENGTH } from "../dialing";
-  import { dialSuggestions } from "../contacts";
+  import { defaultNumberRegion, dialSuggestions } from "../contacts";
   import { normalizeDialNumber } from "../dialing";
   import type { Contact } from "../generated/AppInfo";
   import Icon from "./Icon.svelte";
@@ -16,7 +16,7 @@
     setupLabel,
     setupEnabled,
     contacts = [],
-    matchGermanNumbers = true,
+    numberRegion = defaultNumberRegion,
     oncall,
     onsetup,
     children,
@@ -29,7 +29,7 @@
     setupLabel: MessageValue;
     setupEnabled: boolean;
     contacts?: readonly Contact[];
-    matchGermanNumbers?: boolean;
+    numberRegion?: string | null;
     oncall: () => void;
     onsetup: () => void;
     children?: Snippet;
@@ -44,7 +44,7 @@
       normalizeDialNumber(value) === null,
   );
   const suggestions = $derived(
-    dialSuggestions(contacts, value, matchGermanNumbers, $locale),
+    dialSuggestions(contacts, value, numberRegion, $locale),
   );
   const keys = [
     "1",

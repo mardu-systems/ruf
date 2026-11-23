@@ -124,6 +124,7 @@ export default async function settingsRegressions(
           favoritesFirst: true,
           showOrganization: true,
           matchGermanNumbers: true,
+          numberRegion: "DE",
         },
         history: { recordingEnabled: true, retentionDays: null },
       },
@@ -2051,6 +2052,58 @@ export default async function settingsRegressions(
       await page
         .getByRole("button", { name: "Deaktivieren · Büro", exact: true })
         .waitFor();
+    },
+  );
+  await check(
+    "regional number matching can be selected, disabled and restored",
+    "",
+    async () => {
+      await page
+        .getByRole("button", { name: "Kontakte & Verlauf", exact: true })
+        .click();
+      const region = page.getByLabel(
+        "Land oder Region für nationale Rufnummern",
+        { exact: true },
+      );
+      const on = page.getByLabel(
+        "Nationale und internationale Rufnummern abgleichen",
+        { exact: true },
+      );
+      const save = page.getByRole("button", {
+        name: "Anzeige & Verlauf speichern",
+        exact: true,
+      });
+      if ((await region.inputValue()) !== "DE")
+        throw Error("Existing German region changed");
+      await region.selectOption("GB");
+      await save.click();
+      await page.waitForFunction(
+        () => window.__settingsTest.preferences.contacts.numberRegion === "GB",
+      );
+      if (_capture) {
+        await region.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: "output/playwright/number-region.png" });
+      }
+      await on.uncheck();
+      if (!(await region.isDisabled()))
+        throw Error(
+          "Disabled regional matching offers an active region selector",
+        );
+      await save.click();
+      await page.waitForFunction(
+        () =>
+          window.__settingsTest.preferences.contacts.matchGermanNumbers ===
+          false,
+      );
+      await on.check();
+      if ((await region.inputValue()) !== "GB")
+        throw Error("Toggling regional matching discarded the saved region");
+      await save.click();
+      await page.waitForFunction(() => {
+        const { matchGermanNumbers, numberRegion } =
+          window.__settingsTest.preferences.contacts;
+        return matchGermanNumbers && numberRegion === "GB";
+      });
     },
   );
   await check(

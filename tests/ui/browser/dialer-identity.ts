@@ -18,6 +18,7 @@ export default async function dialerIdentity(
 ) {
   await page.addInitScript(() => {
     if (location.search.includes("identity-flow") === false) return;
+    const ukRegion = location.search.includes("uk-region");
     window.isTauri = true;
     localStorage.setItem("sip.introduction.v1", "seen");
     let next = 1;
@@ -32,8 +33,8 @@ export default async function dialerIdentity(
       phones: [
         {
           label: "Arbeit",
-          number: "+49 30 55501234",
-          destination: "+493055501234",
+          number: ukRegion ? "+44 20 7946 0018" : "+49 30 55501234",
+          destination: ukRegion ? "+442079460018" : "+493055501234",
         },
       ],
     };
@@ -152,6 +153,7 @@ export default async function dialerIdentity(
               favoritesFirst: true,
               showOrganization: true,
               matchGermanNumbers: true,
+              numberRegion: ukRegion ? "GB" : "DE",
             },
             history: { recordingEnabled: true, retentionDays: null },
           };
@@ -367,6 +369,21 @@ export default async function dialerIdentity(
         ).length,
     )) === 0,
     "automatic contact permission prompt",
+  );
+  await page.goto(`${origin}/?identity-flow=1&uk-region=1`);
+  await input.fill("020 7946 0018");
+  await page.getByRole("button", { name: /Mara Muster/ }).waitFor();
+  await page.getByRole("button", { name: "Anrufen", exact: true }).click();
+  await page.waitForFunction(() =>
+    window.__identity.commands.some(({ command }) => command === "dial"),
+  );
+  assert(
+    (await page.evaluate(
+      () =>
+        window.__identity.commands.find(({ command }) => command === "dial")
+          ?.args.destination,
+    )) === "02079460018",
+    "international lookup changed the number dialed",
   );
   return { passed: true };
 }

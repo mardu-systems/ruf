@@ -170,6 +170,7 @@ export default async function phoneRegressions(
               favoritesFirst: true,
               showOrganization: true,
               matchGermanNumbers: true,
+              numberRegion: "DE",
             },
             history: { recordingEnabled: true, retentionDays: null },
           };

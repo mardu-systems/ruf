@@ -12,7 +12,7 @@ search result. Individual contacts, history and settings searches remain availab
 ## Combined contacts and history search
 
 - Contacts reuse the authorized in-memory `ContactsSnapshot` and `searchContacts`
-  with current favorites, organization-display and German-number matching
+  with current favorites, organization-display and regional number matching
   preferences. Names, companies and original phone numbers remain searchable;
   hidden company labels do not disable company search. Ambiguous owners stay
   separate. A result opens that contact's existing detail/number chooser.
