@@ -78,6 +78,16 @@ Rust and Tauri 2 power the desktop application, with Svelte for the interface.
 SIP and audio run natively through baresip. Original project code uses the
 [MIT license](LICENSE); dependencies retain their own licenses.
 
+Ruf can open `tel:` links and put the number in the dialer for review. Use
+**Call** to place the call. Choose Ruf as the handler after installation.
+
+- **macOS** uses **Phone → Settings → General → Default for calls**. On older
+  macOS versions, look for the same option in FaceTime.
+- **Windows** uses **Settings → Apps → Default apps**. With the Ruf setup EXE
+  installed, select Ruf for the **TEL** link type.
+- **Linux** provides the handler through the DEB or RPM launcher. See
+  [Linux setup](docs/linux.md#telephone-links) for the XDG setting and AppImage integration.
+
 ## Status and limitations
 
 - Development targets are **macOS 14+ ARM64/Intel**, **Windows 11 x64/ARM64**

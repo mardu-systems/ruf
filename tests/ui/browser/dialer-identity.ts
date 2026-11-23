@@ -87,6 +87,9 @@ export default async function dialerIdentity(
     const fixture: Window["__identity"] = {
       state,
       contact,
+      pendingTelNumber: location.search.includes("tel-start")
+        ? "+493055501234"
+        : null,
       permission: "authorized",
       commands: [] as FixtureCommand[],
       emit(event) {
@@ -142,6 +145,11 @@ export default async function dialerIdentity(
           return id;
         }
         if (command === "plugin:event|unlisten") return;
+        if (command === "take_pending_tel_number") {
+          const number = fixture.pendingTelNumber;
+          fixture.pendingTelNumber = null;
+          return number;
+        }
         if (command === "get_app_info")
           return { version: "0.1.0", telephony: "linked" };
         if (command === "get_preferences")
@@ -384,6 +392,52 @@ export default async function dialerIdentity(
           ?.args.destination,
     )) === "02079460018",
     "international lookup changed the number dialed",
+  );
+  await page.evaluate(() => {
+    const f = window.__identity;
+    f.pendingTelNumber = "100";
+    f.emit("tel-link-pending");
+  });
+  await page.waitForFunction(() => window.__identity.pendingTelNumber === null);
+  assert(
+    (await page.evaluate(() => window.__identity.state.call)) === "active",
+    "a telephone link interrupted the current call",
+  );
+  await page.evaluate(() => {
+    const f = window.__identity;
+    f.state.calls = [];
+    f.state.call = "idle";
+    f.state.callId = null;
+    f.emit("phone-state-changed");
+  });
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>(".number-entry input")?.value ===
+      "100",
+  );
+  await page.goto(`${origin}/?identity-flow=1&tel-start=1`);
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>(".number-entry input")?.value ===
+      "+493055501234",
+  );
+  await page.getByRole("button", { name: "Verlauf", exact: true }).click();
+  await page.evaluate(() => {
+    const f = window.__identity;
+    f.pendingTelNumber = "+442079460018";
+    f.emit("tel-link-pending");
+  });
+  await page.waitForFunction(() => {
+    const input = document.querySelector<HTMLInputElement>(
+      ".number-entry input",
+    );
+    return input?.value === "+442079460018" && input === document.activeElement;
+  });
+  assert(
+    await page.evaluate(() =>
+      window.__identity.commands.every(({ command }) => command !== "dial"),
+    ),
+    "a telephone link called without confirmation",
   );
   return { passed: true };
 }

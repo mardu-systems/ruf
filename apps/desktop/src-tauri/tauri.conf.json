@@ -54,17 +54,19 @@
     "linux": {
       "appimage": {
         "files": {
-          "/usr/share/applications/sip-desktop.desktop": "linux/appimage.desktop"
+          "/usr/share/applications/sip-desktop.desktop": "linux/ruf.desktop"
         }
       },
       "deb": {
         "depends": ["libpulse0", "libayatana-appindicator3-1"],
+        "desktopTemplate": "linux/ruf.desktop",
         "files": {
           "/usr/share/applications/sip-desktop.desktop": "linux/sip-desktop.desktop"
         }
       },
       "rpm": {
         "depends": ["libpulse.so.0()(64bit)"],
+        "desktopTemplate": "linux/ruf.desktop",
         "files": {
           "/usr/share/applications/sip-desktop.desktop": "linux/sip-desktop.desktop"
         }

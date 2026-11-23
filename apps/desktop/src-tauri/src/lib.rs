@@ -14,6 +14,7 @@ mod preferences;
 mod shell;
 mod shell_policy;
 mod store;
+mod tel_links;
 use tauri::Manager;
 
 #[cfg(all(feature = "app-store", not(target_os = "macos")))]
@@ -28,8 +29,13 @@ pub fn run() {
     let autostart = tauri_plugin_autostart::Builder::new().args(["--autostart"]);
     #[cfg(all(target_os = "macos", not(feature = "app-store")))]
     let autostart = autostart.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+    let tel_state = tel_links::TelLinkState::default();
+    tel_state.stage_launch_args(&std::env::args().collect::<Vec<_>>());
     let builder =
         tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if tel_links::forward_launch(app, &args) {
+                return;
+            }
             if !desktop::start_hidden(app, &args) {
                 let _ = shell::show_phone(app);
             }
@@ -41,6 +47,7 @@ pub fn run() {
         .manage(phone::PhoneState::default())
         .manage(contacts::ContactsState::default())
         .manage(shell::ShellState::default())
+        .manage(tel_state)
         .menu(|app| {
             localization::initialize(app);
             shell::app_menu(app, &phone_core::EngineSnapshot::default())
@@ -65,6 +72,7 @@ pub fn run() {
             about::open_about_link,
             about::get_software_bill,
             commands::get_app_info,
+            tel_links::take_pending_tel_number,
             preferences::get_preferences,
             localization::get_localization,
             preferences::save_preferences,
@@ -126,6 +134,10 @@ pub fn run() {
     app.run(|app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = &event {
             shell::exit_requested(app, api);
+        }
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = &event {
+            tel_links::opened(app, urls);
         }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = &event {

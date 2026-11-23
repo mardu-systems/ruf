@@ -201,6 +201,7 @@ interface SearchFixture extends Commands {
 interface IdentityFixture extends Commands {
   state: FixtureSnapshot & { calls: FixtureCall[] };
   contact: Contact;
+  pendingTelNumber: string | null;
   permission: ContactsPermission;
   emit(event: string): void;
   project(): FixtureSnapshot;

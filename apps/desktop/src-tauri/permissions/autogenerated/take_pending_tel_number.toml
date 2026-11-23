@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-take-pending-tel-number"
+description = "Enables the take_pending_tel_number command without any pre-configured scope."
+commands.allow = ["take_pending_tel_number"]
+
+[[permission]]
+identifier = "deny-take-pending-tel-number"
+description = "Denies the take_pending_tel_number command without any pre-configured scope."
+commands.deny = ["take_pending_tel_number"]

@@ -1,8 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Ruf
-Exec=sip-desktop
+Comment=Ruf · compact SIP softphone
+Exec=sip-desktop --open-tel %u
 Icon=sip-desktop
 StartupWMClass=sip-desktop
 Terminal=false
 Categories=Network;Telephony;
+MimeType=x-scheme-handler/tel;

@@ -34,6 +34,8 @@ export const openAboutLink = (link: AboutLink) =>
 
 export const getEngineSnapshot = () =>
   desktopInvoke<EngineSnapshot>("get_engine_snapshot");
+export const takePendingTelNumber = () =>
+  desktopInvoke<string | null>("take_pending_tel_number");
 export const configureAccount = (account: AccountConfig) =>
   desktopInvoke<EngineSnapshot>("configure_account", { account });
 export const saveAccount = (

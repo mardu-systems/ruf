@@ -6,6 +6,17 @@
   <string>en</string>
   <key>CFBundleLocalizations</key>
   <array><string>de</string><string>en</string></array>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLName</key>
+      <string>org.rufapp.desktop.tel</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>tel</string></array>
+    </dict>
+  </array>
   <key>NSContactsUsageDescription</key>
   <string>Ruf needs access to your contacts so you can find names and phone numbers and call them directly. Your address book is not changed.</string>
   <key>NSMicrophoneUsageDescription</key>

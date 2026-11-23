@@ -1,6 +1,7 @@
 # Menus, action search and keyboard navigation
 
 Ruf provides window-local shortcuts, a searchable action list and native menus.
+
 The magnifier in the phone header and **Cmd/Ctrl+K** open **Search Ruf**.
 Menu and section names below are English descriptions of the current German UI.
 The shared result list groups actions, contacts and local call history. Action
@@ -8,6 +9,32 @@ search matches all entered words against German labels and action synonyms.
 Contact/history results start after two characters. No permission prompt or
 telephone operation is caused by opening, typing into, or choosing a personal
 search result. Individual contacts, history and settings searches remain available.
+
+## Telephone links
+
+On macOS, the bundle declares `tel` in `CFBundleURLTypes` and receives a native
+open request. The Windows setup EXE adds Ruf to Default Apps and the Linux
+desktop launcher declares `x-scheme-handler/tel`. Both pass
+`--open-tel <URI>` to the executable. This form requires exactly one URI and
+accepts no additional arguments. The existing single-instance plugin forwards
+these arguments to a running Ruf. Ruf leaves the OS default selection to the user.
+For example, `tel:+44-20-7946-0018` opens the phone and fills the dialer with
+`+442079460018`.
+
+Ruf accepts simple global and local numbers, including percent-encoded digits,
+the leading plus and supported visual separators. The decoded dial target
+contains at most 64 characters. The encoded path is bounded to 512 bytes.
+Links with an authority, query, fragment, extension or phone context are
+ignored. Ruf keeps the original dialing prefix and skips invalid links without
+replacing a valid pending draft. During a call, the number stays in the dial
+draft until the dialer is visible again.
+
+`take_pending_tel_number → string | null` takes no input and is allowed only for
+the main webview. A string is a validated dial draft and `null` means there is
+no pending number. The command consumes the most recent valid pending number.
+`tel-link-pending` is emitted only to that webview with a null payload. The
+webview subscribes before reading so a cold-start link is retained. This
+command and event never place, transfer or interrupt a call.
 
 ## Combined contacts and history search
 

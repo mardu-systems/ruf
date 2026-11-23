@@ -78,6 +78,22 @@ packaging tools. It changes neither the application's sandbox nor media path.
 - System contacts remain explicitly unsupported. Existing dialing, local history,
   account settings and call controls use their existing cross-platform services.
 
+## Telephone links
+
+The DEB and RPM install `Ruf.desktop` with support for `x-scheme-handler/tel`.
+Choose Ruf in your desktop's default applications settings, or run:
+
+```sh
+xdg-mime default Ruf.desktop x-scheme-handler/tel
+```
+
+For AppImage, use desktop integration that installs the bundled launcher in
+the host's applications directory and points its `Exec` command at the
+AppImage. The command must retain `--open-tel %u` and the entry's
+`MimeType=x-scheme-handler/tel;`. Select the integrated launcher as the
+default using its desktop file ID. Opening a link fills the dialer and leaves
+placing the call to you.
+
 ## Automated verification
 
 ```sh

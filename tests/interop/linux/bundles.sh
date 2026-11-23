@@ -27,7 +27,8 @@ for package in "$temporary/deb" "$temporary/squashfs-root"; do
   desktop="$package/usr/share/applications/Ruf.desktop"
   [[ -f "$desktop" ]]
   grep -Fxq 'Icon=sip-desktop' "$desktop"
-  grep -Fxq 'Exec=sip-desktop' "$desktop"
+  grep -Fxq 'Exec=sip-desktop --open-tel %u' "$desktop"
+  grep -Fxq 'MimeType=x-scheme-handler/tel;' "$desktop"
   if grep -Fxq 'NoDisplay=true' "$desktop"; then
     echo "Visible Ruf launcher is hidden: $desktop"
     exit 1
@@ -37,15 +38,17 @@ done
 cmp apps/desktop/src-tauri/linux/sip-desktop.desktop \
   "$temporary/deb/usr/share/applications/sip-desktop.desktop"
 grep -Fxq 'NoDisplay=true' "$temporary/deb/usr/share/applications/sip-desktop.desktop"
-cmp apps/desktop/src-tauri/linux/appimage.desktop \
+cmp apps/desktop/src-tauri/linux/ruf.desktop \
   "$temporary/squashfs-root/sip-desktop.desktop"
 if grep -Fxq 'NoDisplay=true' "$temporary/squashfs-root/sip-desktop.desktop"; then
   echo "AppImage Ruf launcher is hidden"
   exit 1
 fi
-desktop_digest=$(sha256sum apps/desktop/src-tauri/linux/sip-desktop.desktop | cut -d ' ' -f 1)
-rpm -qp --qf '[%{FILENAMES} %{FILEDIGESTS}\n]' "${rpm[0]}" | \
-  grep -Fxq "/usr/share/applications/sip-desktop.desktop $desktop_digest"
+rpm_manifest=$(rpm -qp --qf '[%{FILENAMES} %{FILEDIGESTS}\n]' "${rpm[0]}")
+for entry in 'Ruf.desktop:ruf.desktop' 'sip-desktop.desktop:sip-desktop.desktop'; do
+  desktop_digest=$(sha256sum "apps/desktop/src-tauri/linux/${entry#*:}" | cut -d ' ' -f 1)
+  grep -Fxq "/usr/share/applications/${entry%:*} $desktop_digest" <<<"$rpm_manifest"
+done
 tray=$(find "$temporary/squashfs-root" -name 'libayatana-appindicator3.so.1' -print -quit)
 [[ -n "$tray" && -f "$tray" ]]
-echo "LINUX_BUNDLES_OK: $target architectures, launchers, icon aliases and tray/audio dependencies verified"
+echo "LINUX_BUNDLES_OK: $target architectures, telephone links, icon aliases and tray/audio dependencies verified"

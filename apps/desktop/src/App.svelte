@@ -22,6 +22,7 @@
     getPreferences,
     type SettingsSection,
     getEngineSnapshot,
+    takePendingTelNumber,
     hangup,
     reject,
     setCallMuted,
@@ -149,10 +150,7 @@
       case "number":
         if (!callIdle) return;
         selectView("dialer");
-        await tick();
-        document
-          .querySelector<HTMLInputElement>(".number-entry input")
-          ?.focus();
+        await focusNumberInput();
         break;
       case "find": {
         if (view === "start" || view === "dialer") selectView("contacts");
@@ -456,6 +454,10 @@
     if (view === "start" && next !== "start") markIntroduction();
     view = next;
   }
+  async function focusNumberInput() {
+    await tick();
+    document.querySelector<HTMLInputElement>(".number-entry input")?.focus();
+  }
   function applySnapshot(next: EngineSnapshot) {
     if (snapshot && next.revision < snapshot.revision) return;
     const becameRegistered =
@@ -573,6 +575,36 @@
     }
     const actionUnlisteners: UnlistenFn[] = [];
     if (!browser) {
+      let readingTelLink = false;
+      let telLinkPending = false;
+      async function readTelLink() {
+        telLinkPending = true;
+        if (readingTelLink) return;
+        readingTelLink = true;
+        try {
+          while (mounted && telLinkPending) {
+            telLinkPending = false;
+            const number = await takePendingTelNumber().catch(() => null);
+            if (mounted && number !== null) {
+              searchOpen = false;
+              destination = number;
+              selectView("dialer");
+              if (callIdle) await focusNumberInput();
+            }
+          }
+        } finally {
+          readingTelLink = false;
+        }
+      }
+      void listen("tel-link-pending", () => void readTelLink())
+        .then((unlisten) => {
+          if (mounted) actionUnlisteners.push(unlisten);
+          else unlisten();
+        })
+        .catch(() => {})
+        .then(() => {
+          if (mounted) void readTelLink();
+        });
       for (const action of phoneActions.filter(
         (action) =>
           action.id !== "settings" &&

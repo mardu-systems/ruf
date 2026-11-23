@@ -24,6 +24,7 @@
     "allow-set-contact-favorite",
     "allow-get-engine-snapshot",
     "allow-dial",
+    "allow-take-pending-tel-number",
     "allow-answer",
     "allow-reject",
     "allow-hangup",

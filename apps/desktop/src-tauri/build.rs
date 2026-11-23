@@ -41,6 +41,7 @@ fn main() {
             "configure_account",
             "get_engine_snapshot",
             "dial",
+            "take_pending_tel_number",
             "answer",
             "reject",
             "hangup",
