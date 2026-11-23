@@ -158,6 +158,8 @@ interface SettingsFixture extends Commands {
   closed: boolean;
   quit?: boolean;
   failDesktopSave: boolean;
+  failPreferenceSave?: boolean;
+  failHistoryClear?: boolean;
   failTestNotification: boolean;
   failOpenNotificationSettings: boolean;
   microphonePermission: ContactsPermission;

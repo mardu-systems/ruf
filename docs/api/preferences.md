@@ -37,6 +37,11 @@ Changing history collection during a call returns `busy`. Shutdown returns
 not stop SIP. These preferences remain separate from the compatible
 `DesktopSettings` notification-enabled and actual OS autostart/permission fields.
 
+During a call, Settings keep contact display, retention, and deletion of
+completed history available. A pending recording change can be undone in place,
+so other changes can be saved without waiting for the call to end. The
+retention confirmation appears when the draft shortens the saved limit.
+
 The history worker serializes policy changes with native call lifecycle events.
 A call's collection choice is latched at its first start event: enabling later
 never reconstructs a previously ignored call. Existing recorded calls can finish

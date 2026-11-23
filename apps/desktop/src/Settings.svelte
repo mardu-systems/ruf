@@ -66,6 +66,8 @@
   let error = $state<MessageValue | null>(null);
   let audioError = $state<MessageValue | null>(null);
   let feedback = $state<MessageValue>("");
+  let partialSave = $state<MessageValue | null>(null);
+  let settingsScroll: HTMLDivElement;
   let editedId = $state<number | null>(null);
   let name = $state("");
   let account = $state<AccountConfig>({
@@ -115,6 +117,25 @@
   const activeSection = $derived(helpOverlay ?? section);
   const readOnlySections: Section[] = ["privacy", "diagnostics", "about"];
   let desktopSettings = $state<DesktopSettings | null>(null);
+  const unknownPreferences = $derived(
+    preferences
+      ? null
+      : message(
+          loading || preferencesLoading
+            ? "settings.saved_values_loading"
+            : "settings.saved_values_unavailable",
+        ),
+  );
+  const unknownDesktopValues = $derived(
+    unknownPreferences ??
+      (desktopSettings
+        ? null
+        : message(
+            loading
+              ? "settings.saved_values_loading"
+              : "settings.saved_values_unavailable",
+          )),
+  );
   let autostartEnabled = $state(false);
   let notificationsEnabled = $state(false);
   let desktopBaseline = $state("");
@@ -158,6 +179,11 @@
     editedId !== null && snapshot !== null && !existing,
   );
   const callIdle = $derived(!snapshot || snapshot.call === "idle");
+  const recordingDirty = $derived(
+    preferences !== null &&
+      preferenceDraft.history.recordingEnabled !==
+        preferences.history.recordingEnabled,
+  );
   const disabled = $derived(
     loading || !info || info.telephony !== "linked" || !snapshot || !callIdle,
   );
@@ -239,11 +265,15 @@
     target?: string,
   ) {
     if (busy) {
-      if (readOnlySections.includes(next)) helpOverlay = next;
+      if (readOnlySections.includes(next) && next !== activeSection) {
+        helpOverlay = next;
+        settingsScroll.scrollTop = 0;
+      }
       return;
     }
     if (helpOverlay && next === section && id === editedId && !target) {
       helpOverlay = null;
+      settingsScroll.scrollTop = 0;
       return;
     }
     if (next === section && id === editedId && !target && !helpOverlay) return;
@@ -313,6 +343,8 @@
     else void finishWindowAction(action.kind);
   }
   function applyNavigation(next: Section, id: number | null, target?: string) {
+    const resetScroll =
+      next !== activeSection || (next === "accounts" && id !== editedId);
     helpOverlay = null;
     const leaving =
       next !== section || (next === "accounts" && id !== editedId);
@@ -326,6 +358,7 @@
       discardPreferences();
     if (leaving) account.password = "";
     section = next;
+    if (resetScroll) settingsScroll.scrollTop = 0;
     if (next === "accounts" && (id !== editedId || !accountDirty)) edit(id);
     pendingNavigation = null;
     if (target) {
@@ -538,14 +571,38 @@
       busy ||
       browser ||
       (!desktopDirty && !preferencesDirty) ||
-      (desktopDirty && !desktopSettings)
+      (desktopDirty && !desktopSettings) ||
+      (!callIdle && recordingDirty)
     )
       return;
     const current = ++epoch;
     busy = true;
     error = null;
     feedback = "";
+    partialSave = null;
+    const savingNotifications = section === "notifications";
+    // Commit caller privacy before an operation that can enable notifications.
+    const privacyFirst =
+      savingNotifications &&
+      notificationsEnabled &&
+      !preferenceDraft.showCallerInNotifications;
+    const languageChanged = preferences?.language !== preferenceDraft.language;
+    let savedPreferences = false;
+    let savedDesktop = false;
+    async function persistPreferences() {
+      const result = await savePreferences(
+        $state.snapshot(preferenceDraft),
+        confirmRetention,
+      );
+      if (!mounted || current !== epoch) return;
+      preferences = result;
+      preferenceDraft = structuredClone(result);
+      confirmRetention = false;
+      savedPreferences = true;
+    }
     try {
+      if (privacyFirst && preferencesDirty) await persistPreferences();
+      if (!mounted || current !== epoch) return;
       if (desktopDirty) {
         const result = await saveDesktopSettings(
           autostartEnabled,
@@ -553,22 +610,28 @@
         );
         if (!mounted || current !== epoch) return;
         resetDesktop(result);
+        savedDesktop = true;
       }
-      if (preferencesDirty) {
-        const result = await savePreferences(
-          $state.snapshot(preferenceDraft),
-          confirmRetention,
-        );
-        if (!mounted || current !== epoch) return;
-        preferences = result;
-        preferenceDraft = structuredClone(result);
-        confirmRetention = false;
-        await refreshLocalization();
-        if (!mounted || current !== epoch) return;
-      }
+      if (preferencesDirty && !savedPreferences) await persistPreferences();
+      if (!mounted || current !== epoch) return;
       feedback = message("settings.saved");
+      if (savedPreferences && languageChanged)
+        await refreshLocalization().catch(() => {
+          if (mounted && current === epoch)
+            feedback = message("settings.language_saved_refresh_failed");
+        });
     } catch (reason) {
-      if (mounted && current === epoch) error = errorMessage(reason);
+      if (mounted && current === epoch) {
+        if (savedPreferences)
+          partialSave = message("settings.caller_details_saved_partial");
+        else if (savedDesktop)
+          partialSave = message(
+            savingNotifications
+              ? "settings.notifications_saved_partial"
+              : "settings.autostart_saved_partial",
+          );
+        error = errorMessage(reason);
+      }
     } finally {
       if (mounted && current === epoch) busy = false;
     }
@@ -607,6 +670,7 @@
     if (preferences)
       preferenceDraft = structuredClone($state.snapshot(preferences));
     confirmRetention = false;
+    partialSave = null;
   }
   async function chooseAccount(id: number) {
     if (busy || !callIdle) return;
@@ -687,7 +751,13 @@
       edit(
         editedId ?? result.accounts.find((a) => !before.has(a.id))?.id ?? null,
       );
-      feedback = message("settings.account_saved");
+      feedback = message(
+        existing?.enabled === false
+          ? "settings.account_saved_disabled"
+          : existing?.registration === "registering"
+            ? "settings.account_saved"
+            : "settings.account_saved_generic",
+      );
       if (result.lastError) error = errorMessage(result.lastError);
     } catch (reason) {
       if (mounted) error = errorMessage(reason);
@@ -800,7 +870,7 @@
           disabled={busy && !readOnlySections.includes(item.id)}
           onclick={() => navigate(item.id)}
           ><Icon name={item.icon} size={16} /><span>{$text(item.label)}</span
-          >{#if item.id === "accounts"}<span class="nav-count"
+          >{#if item.id === "accounts" && snapshot}<span class="nav-count"
               >{accounts.length}</span
             >{/if}</button
         >{/each}
@@ -816,7 +886,7 @@
           title={accounts.length >= 8
             ? $t("settings.account_limit")
             : $t("settings.add_account")}
-          disabled={busy || loading || accounts.length >= 8}
+          disabled={busy || disabled || accounts.length >= 8}
           onclick={() => navigate("accounts", null, "name")}
           ><Icon name="plus" size={16} /></button
         >
@@ -848,7 +918,7 @@
                     : $t("settings.not_registered")}</span
             ></button
           >{/each}
-        {#if !accounts.length}<p class="accounts-empty">
+        {#if snapshot && !accounts.length}<p class="accounts-empty">
             {$t("settings.no_accounts")}<br />{$t("settings.first_account")}
           </p>{/if}
       </nav>
@@ -872,6 +942,7 @@
     </div>
     <div
       class="settings-scroll"
+      bind:this={settingsScroll}
       onfocusin={(event) => {
         const target = event.target;
         if (
@@ -887,6 +958,7 @@
           bind:startHidden={preferenceDraft.startHidden}
           bind:language={preferenceDraft.language}
           available={desktopSettings?.autostartAvailable ?? false}
+          unknownValues={unknownDesktopValues}
           disabled={busy ||
             loading ||
             browser ||
@@ -903,6 +975,9 @@
           dirty={desktopDirty || preferencesDirty}
           {busy}
           canSave={!loading && !browser && !!desktopSettings && !!preferences}
+          savedEnabled={desktopSettings?.notificationsEnabled ?? null}
+          savedShowCaller={preferences?.showCallerInNotifications ?? null}
+          unknownValues={unknownDesktopValues}
           onsave={() => void saveDesktop()}
           ondiscard={discardPreferences}
         />
@@ -911,7 +986,12 @@
           bind:value={preferenceDraft}
           bind:confirmRetention
           dirty={preferencesDirty}
-          disabled={busy || browser || !preferences || !callIdle}
+          disabled={busy || browser || !preferences}
+          clearDisabled={busy || browser}
+          callActive={!callIdle}
+          {recordingDirty}
+          savedRetentionDays={preferences?.history.retentionDays ?? null}
+          unknownValues={unknownPreferences}
           onsave={() => void saveDesktop()}
           ondiscard={discardPreferences}
         />
@@ -1088,18 +1168,19 @@
           role="alert"
         >
           <p>
+            {#if partialSave}<strong>{$text(partialSave)}</strong><br />{/if}
             {$text(error)}{#if error === audioError}
               {$t("settings.audio_error_help")}{/if}
           </p>
-          <button
-            class="text-button"
-            type="button"
-            disabled={busy || loading}
-            onclick={() => {
-              void refresh();
-              void loadPreferences();
-            }}>{$t("settings.reload_status")}</button
-          >
+          {#if !partialSave}<button
+              class="text-button"
+              type="button"
+              disabled={busy || loading}
+              onclick={() => {
+                void refresh();
+                void loadPreferences();
+              }}>{$t("settings.reload_status")}</button
+            >{/if}
         </div>{/if}
       {#if preferencesError && ["general", "notifications", "contacts"].includes(activeSection)}
         <div class="settings-feedback error" role="alert">

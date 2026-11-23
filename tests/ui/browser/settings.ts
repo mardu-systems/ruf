@@ -91,7 +91,8 @@ export default async function settingsRegressions(
       snapshot.lastError = saved.lastError;
     }
     const notificationPermission =
-      scenario === "linux-notifications"
+      scenario === "linux-notifications" ||
+      scenario === "notification-authorized"
         ? "authorized"
         : scenario === "notification-permission"
           ? "notDetermined"
@@ -229,6 +230,8 @@ export default async function settingsRegressions(
           return structuredClone(state.preferences);
         }
         if (command === "save_preferences") {
+          if (state.failPreferenceSave)
+            throw { code: "storageFailure", message: "Preference save failed" };
           if (
             args.preferences!.history.retentionDays !== null &&
             !args.confirmHistoryDeletion
@@ -331,6 +334,8 @@ export default async function settingsRegressions(
             audioDevicesAvailable: true,
             credentialError: null,
           };
+        if (command === "clear_history" && state.failHistoryClear)
+          throw { code: "storageFailure", message: "History deletion failed" };
         if (command === "copy_diagnostics" || command === "clear_history")
           return;
         if (command === "set_account_enabled") {
@@ -1590,7 +1595,7 @@ export default async function settingsRegressions(
         f.resolveSave!();
       });
       await page
-        .getByText("Gespeichert. Die Anmeldung an der Telefonanlage läuft.", {
+        .getByText("Kontoeinstellungen gespeichert.", {
           exact: true,
         })
         .waitFor();
@@ -1926,12 +1931,11 @@ export default async function settingsRegressions(
           .isEnabled())
       )
         throw Error("Independent OS check blocked by storage");
-      if (
-        !(await page
-          .getByLabel("Eingehende Anrufe anzeigen", { exact: true })
-          .isDisabled())
-      )
-        throw Error("Failed preferences became editable defaults");
+      await page
+        .getByText("Gespeicherte Werte sind nicht verfügbar.", { exact: true })
+        .waitFor();
+      if ((await page.locator("#notifications-enabled").count()) !== 0)
+        throw Error("Failed preferences looked configured");
       if (
         await page.evaluate(() =>
           window.__settingsTest.commands.some(
@@ -2052,6 +2056,227 @@ export default async function settingsRegressions(
       await page
         .getByRole("button", { name: "Deaktivieren · Büro", exact: true })
         .waitFor();
+    },
+  );
+  await check(
+    "notification privacy is saved before enabling alerts and partial saves can be retried",
+    "notification-authorized",
+    async () => {
+      await page
+        .getByRole("button", { name: "Mitteilungen", exact: true })
+        .click();
+      await page.evaluate(() => {
+        window.__settingsTest.desktop.notificationPermission = "authorized";
+        window.__settingsTest.failPreferenceSave = true;
+      });
+      const enabled = page.locator("#notifications-enabled");
+      const caller = page.locator("#notification-caller");
+      const save = page.getByRole("button", {
+        name: "Mitteilungen speichern",
+        exact: true,
+      });
+      const alerts = page.locator(".settings-notices [role=alert]");
+      await enabled.check();
+      await caller.uncheck();
+      await save.click();
+      await alerts.waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/settings-notifications-save-error.png",
+        });
+      const firstWrites = await page.evaluate(() =>
+        window.__settingsTest.commands
+          .filter(({ command }) => command.startsWith("save_"))
+          .map(({ command }) => command),
+      );
+      if (firstWrites.join(",") !== "save_preferences")
+        throw Error(
+          "Alerts were enabled or attempted before saving caller privacy",
+        );
+      if (await caller.isChecked())
+        throw Error("Failed save discarded caller privacy draft");
+      await page.evaluate(() => {
+        window.__settingsTest.failPreferenceSave = false;
+      });
+      await save.click();
+      await page
+        .getByText(
+          "Anruferdetails gespeichert. Die Aktivierung der Mitteilungen ist nicht bestätigt.",
+          { exact: true },
+        )
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/settings-notifications-partial-save.png",
+        });
+      const partial = await page.evaluate(() => ({
+        enabled: window.__settingsTest.desktop.notificationsEnabled,
+        details: window.__settingsTest.preferences.showCallerInNotifications,
+      }));
+      if (partial.enabled || partial.details)
+        throw Error("Teilerfolg wurde falsch persistiert");
+      await page.evaluate(() => {
+        window.__settingsTest.failDesktopSave = false;
+      });
+      await save.click();
+      await page
+        .getByText("Einstellungen gespeichert.", { exact: true })
+        .waitFor();
+      if (
+        !(await page.evaluate(
+          () => window.__settingsTest.desktop.notificationsEnabled,
+        ))
+      )
+        throw Error("Retry did not enable anonymous alerts");
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/settings-notifications-saved.png",
+        });
+    },
+  );
+  await check(
+    "saving a disabled account never claims a registration",
+    "",
+    async () => {
+      await page
+        .getByRole("button", { name: "Deaktivieren · Büro", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Aktivieren · Büro", exact: true })
+        .waitFor();
+      await page.evaluate(() => {
+        window.__settingsTest.holdSave = true;
+      });
+      await page.getByLabel("Name", { exact: true }).fill("Empfang");
+      await page
+        .getByRole("button", { name: "Speichern", exact: true })
+        .click({ timeout: 1500 });
+      await page.waitForFunction(() => !!window.__settingsTest.resolveSave);
+      await page.evaluate(() => window.__settingsTest.resolveSave!());
+      await page
+        .getByText("Gespeichert. Das Konto bleibt deaktiviert.", {
+          exact: true,
+        })
+        .waitFor();
+      await page
+        .getByRole("button", { name: "Aktivieren · Empfang", exact: true })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/settings-account-disabled-saved.png",
+        });
+    },
+  );
+  await check(
+    "during a call only recording is locked and history deletion returns focus",
+    "",
+    async () => {
+      await page
+        .getByRole("button", { name: "Kontakte & Verlauf", exact: true })
+        .click();
+      const recording = page.locator("#history-recording");
+      const save = page.getByRole("button", {
+        name: "Anzeige & Verlauf speichern",
+        exact: true,
+      });
+      await recording.uncheck();
+      await page.locator("#favorites-first").uncheck();
+      await page.evaluate(() => {
+        const f = window.__settingsTest;
+        f.emit({
+          ...f.snapshot,
+          call: "active",
+          callId: "history-call",
+          callAccountId: 1,
+          callConnectedAtMs: Date.now(),
+        });
+      });
+      await page
+        .getByText(/Nimm die Änderung an der Verlaufserfassung zurück/)
+        .waitFor();
+      if (await save.isEnabled())
+        throw Error("Recording draft can be sent during a call");
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/settings-history-recording-draft-locked.png",
+        });
+      await recording.check();
+      await page.waitForFunction(() =>
+        document.querySelector("#history-recording")?.matches(":disabled"),
+      );
+      if (!(await page.locator("#history-retention").isEnabled()))
+        throw Error("Retention is locked during a call");
+      await save.click();
+      await page
+        .getByText("Einstellungen gespeichert.", { exact: true })
+        .waitFor();
+      if (
+        await page.evaluate(
+          () => window.__settingsTest.preferences.contacts.favoritesFirst,
+        )
+      )
+        throw Error("Contact preference was not saved during a call");
+      const clear = page.getByRole("button", {
+        name: "Verlauf löschen …",
+        exact: true,
+      });
+      await clear.click();
+      await page.waitForFunction(
+        () => document.activeElement?.textContent?.trim() === "Abbrechen",
+      );
+      await page
+        .getByRole("button", { name: "Abbrechen", exact: true })
+        .click();
+      await page.waitForFunction(
+        () => document.activeElement?.id === "clear-history",
+      );
+      await page.evaluate(() => {
+        window.__settingsTest.failHistoryClear = true;
+      });
+      await clear.click();
+      const confirm = page.getByRole("button", {
+        name: "Verlauf endgültig löschen",
+        exact: true,
+      });
+      await confirm.click();
+      await page
+        .getByRole("group", { name: /Alle abgeschlossenen Anrufe/ })
+        .getByRole("alert")
+        .waitFor();
+      await page.evaluate(() => {
+        window.__settingsTest.failHistoryClear = false;
+      });
+      await confirm.click();
+      await page
+        .getByText("Abgeschlossene Anrufe wurden aus dem Verlauf gelöscht.", {
+          exact: true,
+        })
+        .waitFor();
+      await page.waitForFunction(
+        () => document.activeElement?.id === "clear-history",
+      );
+    },
+  );
+  await check(
+    "switching sections resets scroll and field search still navigates to the target",
+    "",
+    async () => {
+      const content = page.locator(".settings-scroll");
+      await content.evaluate((el) => (el.scrollTop = el.scrollHeight));
+      await page
+        .getByRole("button", { name: "Diagnose & Hilfe", exact: true })
+        .click();
+      await page.getByText("Aktueller Zustand", { exact: true }).waitFor();
+      if ((await content.evaluate((el) => el.scrollTop)) !== 0)
+        throw Error("New section retained the previous scroll position");
+      await page.locator("#settings-search").fill("Aufbewahrung");
+      await page
+        .getByRole("navigation", { name: "Gefundene Einstellungen" })
+        .getByRole("button", { name: /Aufbewahrung/ })
+        .click();
+      await page.waitForFunction(
+        () => document.activeElement?.id === "history-retention",
+      );
     },
   );
   await check(
@@ -2221,18 +2446,43 @@ export default async function settingsRegressions(
     },
   );
   await check(
+    "unknown preferences are not shown as saved defaults",
+    "preferences-failure",
+    async () => {
+      await page
+        .getByRole("button", { name: "Allgemein", exact: true })
+        .click();
+      await page
+        .getByText("Gespeicherte Werte sind nicht verfügbar.", { exact: true })
+        .waitFor({ timeout: 1500 });
+      if ((await page.locator("#language-preference").count()) !== 0)
+        throw Error("Default language is shown as a saved value");
+      await page
+        .getByRole("button", { name: "Kontakte & Verlauf", exact: true })
+        .click();
+      await page
+        .getByText("Gespeicherte Werte sind nicht verfügbar.", { exact: true })
+        .waitFor();
+      if ((await page.locator("#history-recording").count()) !== 0)
+        throw Error("Default recording preference is shown as saved");
+      if (!(await page.locator("#clear-history").isEnabled()))
+        throw Error(
+          "Reading preferences incorrectly controls history deletion",
+        );
+    },
+  );
+  await check(
     "failed preference load can recover without reopening",
     "preferences-failure",
     async () => {
       await page
         .getByRole("button", { name: "Mitteilungen", exact: true })
         .click();
-      if (
-        !(await page
-          .getByLabel("Anruferdetails anzeigen", { exact: true })
-          .isDisabled())
-      )
-        throw Error("Unknown preferences became editable");
+      await page
+        .getByText("Gespeicherte Werte sind nicht verfügbar.", { exact: true })
+        .waitFor();
+      if ((await page.locator("#notification-caller").count()) !== 0)
+        throw Error("Unknown caller privacy preference looked configured");
       await page.evaluate(() => {
         window.__settingsTest.failPreferences = false;
       });

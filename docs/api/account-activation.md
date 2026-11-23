@@ -29,6 +29,10 @@ selected account remains selected even when disabled; dialing then returns
 Editing/saving a disabled account preserves its disabled state. Removal remains
 a separate, explicitly destructive operation.
 
+Settings use **Save** for a disabled account and confirm that it stays disabled.
+For an enabled account, the post-save notice reports registration in progress
+only when the engine snapshot shows that state.
+
 Settings show activation and outgoing-default actions for the account selected
 in the existing sidebar. Select another account there before managing it; an
 unsaved draft still uses the existing continue/discard guard. The latest native

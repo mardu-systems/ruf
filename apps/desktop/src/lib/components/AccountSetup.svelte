@@ -437,9 +437,11 @@
           ? $t("settings.account_removed")
           : busy
             ? $t("settings.saving")
-            : existing
-              ? $t("settings.save_connect")
-              : $t("settings.add_account")}</button
+            : existing?.enabled === false
+              ? $t("settings.save_account_only")
+              : existing
+                ? $t("settings.save_connect")
+                : $t("settings.add_account")}</button
       >
     </div>
   </fieldset>

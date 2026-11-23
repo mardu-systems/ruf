@@ -43,6 +43,12 @@ or contended session state also uses anonymous text. Changing captions preserves
 the opaque token and its still-live call binding. Existing stale-action checks,
 withdrawal and bounded delivery retry remain in force.
 
+When enabling incoming notifications with caller details turned off in the
+draft, Settings saves any pending caller privacy change before enabling
+notifications. If the first save fails, activation is skipped. Settings keeps
+unconfirmed edits and displays the last saved values and any confirmed part of
+a partial save. The two existing IPC commands keep their separate contracts.
+
 Authorized current contact names apply to incoming captions as “Name ruft an”. Updated or revoked contact references replace the bound caption without changing its action token. The anonymous notification preference still suppresses both contact name and number.
 
 ## Linux desktop

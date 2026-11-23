@@ -18,6 +18,9 @@
     dirty,
     busy,
     canSave,
+    savedEnabled,
+    savedShowCaller,
+    unknownValues,
     onsave,
     ondiscard,
   }: {
@@ -26,6 +29,9 @@
     dirty: boolean;
     busy: boolean;
     canSave: boolean;
+    savedEnabled: boolean | null;
+    savedShowCaller: boolean | null;
+    unknownValues: MessageValue | null;
     onsave: () => void;
     ondiscard: () => void;
   } = $props();
@@ -131,45 +137,56 @@
   </div>
 </div>
 <h2 class="settings-group">{$t("settings.in_ruf")}</h2>
-<fieldset disabled={busy || !canSave}>
-  <div class="setting-row">
-    <div class="setting-description">
-      <label for="notifications-enabled"
-        >{$t("settings.show_incoming_calls")}</label
-      >
-      <p id="notifications-help">
-        {$t("settings.show_incoming_calls_help")}
-      </p>
+{#if unknownValues}
+  <p class="settings-footnote">{$text(unknownValues)}</p>
+{:else}<fieldset disabled={busy || !canSave}>
+    <div class="setting-row">
+      <div class="setting-description">
+        <label for="notifications-enabled"
+          >{$t("settings.show_incoming_calls")}</label
+        >
+        <p id="notifications-help">
+          {$t("settings.show_incoming_calls_help")}
+        </p>
+      </div>
+      <div class="setting-control sound-toggle">
+        <input
+          id="notifications-enabled"
+          type="checkbox"
+          bind:checked={enabled}
+          aria-describedby="notifications-help"
+        /><span aria-hidden="true"
+          >{enabled ? $t("settings.on") : $t("settings.off")}</span
+        >
+      </div>
     </div>
-    <div class="setting-control sound-toggle">
-      <input
-        id="notifications-enabled"
-        type="checkbox"
-        bind:checked={enabled}
-        aria-describedby="notifications-help"
-      /><span aria-hidden="true"
-        >{enabled ? $t("settings.on") : $t("settings.off")}</span
-      >
+    <div class="setting-row">
+      <div class="setting-description">
+        <label for="notification-caller">{$t("settings.show_caller")}</label>
+        <p id="notification-caller-help">
+          {$t("settings.show_caller_help")}
+        </p>
+      </div>
+      <div class="setting-control sound-toggle">
+        <input
+          id="notification-caller"
+          type="checkbox"
+          bind:checked={showCaller}
+          aria-describedby="notification-caller-help"
+        /><span aria-hidden="true"
+          >{showCaller ? $t("settings.on") : $t("settings.off")}</span
+        >
+      </div>
     </div>
-  </div>
-  <div class="setting-row">
-    <div class="setting-description">
-      <label for="notification-caller">{$t("settings.show_caller")}</label>
-      <p>
-        {$t("settings.show_caller_help")}
-      </p>
-    </div>
-    <div class="setting-control sound-toggle">
-      <input
-        id="notification-caller"
-        type="checkbox"
-        bind:checked={showCaller}
-      /><span aria-hidden="true"
-        >{showCaller ? $t("settings.on") : $t("settings.off")}</span
-      >
-    </div>
-  </div>
-</fieldset>
+  </fieldset>{/if}
+{#if dirty && savedEnabled !== null && savedShowCaller !== null}
+  <p class="settings-footnote">
+    {$t("settings.notifications_saved_values", {
+      enabled: savedEnabled ? $t("settings.on") : $t("settings.off"),
+      details: savedShowCaller ? $t("settings.on") : $t("settings.off"),
+    })}
+  </p>
+{/if}
 <h2 class="settings-group" id="notification-permission" tabindex="-1">
   {$t("settings.system_permission")}
 </h2>
