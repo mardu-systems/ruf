@@ -319,6 +319,13 @@ export default async function settingsRegressions(
           command === "test_notification"
         )
           return;
+        if (
+          command === "get_diagnostics" &&
+          scenario === "diagnostics-refresh-failure" &&
+          state.commands.filter((entry) => entry.command === command).length ===
+            2
+        )
+          throw { code: "nativeFailure" };
         if (command === "get_diagnostics")
           return {
             version: "0.1.0",
@@ -2741,6 +2748,115 @@ export default async function settingsRegressions(
       if (!blocked)
         throw Error("New edits were accepted after close was confirmed");
       await page.waitForFunction(() => window.__settingsTest.closed);
+    },
+  );
+  await check(
+    "diagnostic refresh failure labels the last report and keeps copying explicit",
+    "diagnostics-refresh-failure",
+    async () => {
+      await page
+        .getByRole("button", { name: "Diagnose & Hilfe", exact: true })
+        .click();
+      const refresh = page.getByRole("button", {
+        name: "Status erneut prüfen",
+        exact: true,
+      });
+      const copy = page.getByRole("button", {
+        name: "Diagnosebericht kopieren",
+        exact: true,
+      });
+      await page
+        .getByText("1 von 1 Konten haben eine bestätigte Anmeldung.", {
+          exact: true,
+        })
+        .waitFor();
+      if (_capture)
+        await page.screenshot({
+          path: "output/playwright/diagnostics-settings-loaded.png",
+        });
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            async writeText() {
+              throw Error("Synthetic clipboard failure");
+            },
+          },
+        });
+      });
+      await copy.click();
+      await page.waitForFunction(() =>
+        window.__settingsTest.commands.some(
+          ({ command }) => command === "copy_diagnostics",
+        ),
+      );
+      await refresh.click();
+      await page.getByRole("alert").waitFor();
+      const last = page.getByRole("heading", {
+        name: "Letzter erfolgreicher Stand",
+        exact: true,
+      });
+      await last.waitFor({ timeout: 3_000 });
+      const copyLast = page.getByRole("button", {
+        name: "Letzten Bericht kopieren",
+        exact: true,
+      });
+      if (!(await page.locator("time[datetime]").isVisible()))
+        throw Error("Retained report lost its observation time");
+      if (_capture) {
+        await last.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: "output/playwright/diagnostics-settings-stale.png",
+        });
+      }
+      await copyLast.click();
+      await page
+        .getByText("Der letzte Diagnosebericht konnte nicht kopiert werden.", {
+          exact: true,
+        })
+        .waitFor({ timeout: 3_000 });
+      if (
+        (await page.evaluate(
+          () =>
+            window.__settingsTest.commands.filter(
+              ({ command }) => command === "copy_diagnostics",
+            ).length,
+        )) !== 1
+      )
+        throw Error("Copying the last report attempted a fresh native copy");
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: { async writeText() {} },
+        });
+      });
+      await copyLast.click();
+      await page
+        .getByText("Der letzte erfolgreiche Diagnosebericht wurde kopiert.", {
+          exact: true,
+        })
+        .waitFor({ timeout: 3_000 });
+      await refresh.click();
+      const current = page.getByRole("heading", {
+        name: "Aktueller Zustand",
+        exact: true,
+      });
+      await current.waitFor({ timeout: 3_000 });
+      await page.getByRole("alert").waitFor({ state: "hidden" });
+      if (
+        await page
+          .getByText("Der letzte erfolgreiche Diagnosebericht wurde kopiert.", {
+            exact: true,
+          })
+          .isVisible()
+      )
+        throw Error("Copy feedback outlived the report it applied to");
+      if (_capture) {
+        await current.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: "output/playwright/diagnostics-settings-recovered.png",
+        });
+      }
     },
   );
   if (failures.length) throw Error(failures.join("\n"));

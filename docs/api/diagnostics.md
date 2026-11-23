@@ -41,8 +41,10 @@ deadline. Unsupported platforms, including Windows, return `engineUnavailable`. 
 tests exercise actual GTK clipboard dispatch; this is separate from user-initiated
 copying in an installed desktop. See [Linux clipboard](contacts.md#linux-clipboard-and-contacts).
 
-The settings UI first copies the preview's whitelisted JSON using the existing
-WebView Clipboard API, following the contact-number copy pattern. If unavailable,
-it falls back to `copy_diagnostics`. This permits supported Windows WebViews to
-copy while retaining native macOS/Linux fallbacks. The explicit button is required;
-preview/loading never writes to the clipboard.
+The settings UI displays when the report was retrieved. While refreshing or after
+a failed refresh, it labels retained data as the last successful observation.
+The copy action uses the preview's whitelisted JSON through the WebView Clipboard
+API. If that fails for the current report, `copy_diagnostics` retrieves and copies
+a fresh report, and the UI identifies the copy as fresh. Copying a retained
+report uses WebView Clipboard only, since the native command always retrieves
+fresh data. Preview and loading leave the clipboard untouched.

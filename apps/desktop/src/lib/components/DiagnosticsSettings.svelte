@@ -4,37 +4,75 @@
   import { onMount } from "svelte";
   import type { DiagnosticsReport } from "../generated/AppInfo";
   import { getDiagnostics, copyDiagnostics } from "../api";
-  let report = $state<DiagnosticsReport | null>(null),
-    loading = $state(false),
-    error = $state<MessageValue>(""),
-    feedback = $state<MessageValue>("");
+  let report = $state<DiagnosticsReport | null>(null);
+  let checkedAt = $state<Date | null>(null);
+  let loading = $state(false);
+  let loadFailed = $state(false);
+  let copying = $state(false);
+  let copyError = $state<MessageValue>("");
+  let feedback = $state<MessageValue>("");
   let mounted = false;
+  const lastReport = $derived(report !== null && (loading || loadFailed));
+  const checkedAtLabel = $derived(
+    checkedAt
+      ? new Intl.DateTimeFormat($locale, {
+          dateStyle: "medium",
+          timeStyle: "medium",
+        }).format(checkedAt)
+      : "",
+  );
+
   async function refresh() {
-    if (loading) return;
+    if (loading || copying) return;
     loading = true;
-    error = "";
+    loadFailed = false;
+    copyError = "";
+    feedback = "";
     try {
       const value = await getDiagnostics();
-      if (mounted) report = value;
+      if (mounted) {
+        report = value;
+        checkedAt = new Date();
+      }
     } catch {
-      if (mounted) error = message("settings.diagnostics_load_failed");
+      if (mounted) loadFailed = true;
     } finally {
       if (mounted) loading = false;
     }
   }
+
   async function copy() {
-    if (!report) return;
+    if (!report || loading || copying) return;
+    const retained = lastReport;
+    let copied = message(
+      retained
+        ? "settings.diagnostics_last_copied"
+        : "settings.diagnostics_copied",
+    );
+    copying = true;
+    copyError = "";
+    feedback = "";
     try {
       try {
         await navigator.clipboard.writeText(
           JSON.stringify($state.snapshot(report)),
         );
-      } catch {
+      } catch (reason) {
+        if (retained) throw reason;
         await copyDiagnostics();
+        copied = message("settings.diagnostics_fresh_copied");
       }
-      if (mounted) feedback = message("settings.diagnostics_copied");
+      if (mounted) feedback = copied;
     } catch {
-      if (mounted) error = message("settings.diagnostics_copy_failed");
+      if (mounted) {
+        copyError = message(
+          retained
+            ? "settings.diagnostics_last_copy_failed"
+            : "settings.diagnostics_copy_failed",
+        );
+      }
+    } finally {
+      if (mounted) copying = false;
     }
   }
   onMount(() => {
@@ -53,13 +91,21 @@
   </div>
 </div>
 <h2 class="settings-group" id="diagnostics-status" tabindex="-1">
-  {$t("settings.current_status")}
+  {$t(
+    lastReport ? "settings.diagnostics_last_status" : "settings.current_status",
+  )}
 </h2>
 {#if loading}<p role="status">{$t("settings.diagnostics_loading")}</p>{/if}
-{#if error}<p class="settings-feedback error" role="alert">
-    {$text(error)}
+{#if loadFailed}<p class="settings-feedback error" role="alert">
+    {$t("settings.diagnostics_load_failed")}
   </p>{/if}
 {#if report}
+  {#if checkedAt}
+    <p class="settings-footnote">
+      {$t("settings.diagnostics_checked_at")}
+      <time datetime={checkedAt.toISOString()}>{checkedAtLabel}</time>
+    </p>
+  {/if}
   <div class="setting-row">
     <div class="setting-description">
       <h3>{$t("settings.telephony")}</h3>
@@ -166,15 +212,29 @@
   <button
     class="secondary-button"
     type="button"
-    disabled={loading}
+    disabled={loading || copying}
     onclick={() => void refresh()}>{$t("settings.check_status_again")}</button
   ><button
     class="secondary-button"
     type="button"
-    disabled={!report || loading}
-    onclick={() => void copy()}>{$t("settings.copy_diagnostics")}</button
+    disabled={!report || loading || copying}
+    aria-describedby={lastReport ? "diagnostics-copy-status" : undefined}
+    onclick={() => void copy()}
+    >{$t(
+      lastReport
+        ? "settings.diagnostics_copy_last"
+        : "settings.copy_diagnostics",
+    )}</button
   >
 </div>
+{#if lastReport}
+  <p id="diagnostics-copy-status" class="settings-footnote">
+    {$t("settings.diagnostics_last_copy_help", { time: checkedAtLabel })}
+  </p>
+{/if}
+{#if copyError}<p class="settings-feedback error" role="alert">
+    {$text(copyError)}
+  </p>{/if}
 {#if feedback}<p class="settings-feedback" role="status">
     {$text(feedback)}
   </p>{/if}
