@@ -880,7 +880,7 @@ export default async function historyRegressions(
     },
   );
   await check(
-    "clear confirms full scope and preserves ongoing entries",
+    "clear works from an empty filtered view and preserves ongoing entries",
     async () => {
       await fresh();
       await details("Laufender Testanruf").click();
@@ -890,6 +890,10 @@ export default async function historyRegressions(
           .isDisabled(),
         "Ongoing call can be deleted",
       );
+      await search().fill("keine-passenden-anrufe");
+      await page
+        .getByRole("heading", { name: "Keine passenden Anrufe" })
+        .waitFor();
       await page
         .getByRole("button", { name: "Verlauf löschen …", exact: true })
         .click();
@@ -909,6 +913,10 @@ export default async function historyRegressions(
       await page
         .getByRole("button", { name: "Verlauf löschen", exact: true })
         .click();
+      await page.waitForFunction(
+        () => window.__historyFixture.entries.length === 1,
+      );
+      await search().fill("");
       await page.waitForFunction(
         () => document.querySelectorAll(".history-entry").length === 1,
       );

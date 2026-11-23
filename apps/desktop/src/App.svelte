@@ -156,6 +156,8 @@
         break;
       case "find": {
         if (view === "start" || view === "dialer") selectView("contacts");
+        searchQuery = null;
+        historyEntryFocusId = null;
         ++searchFocusRequest;
         break;
       }

@@ -1,6 +1,7 @@
 {
   "actions.address_book_people": "address book people",
-  "actions.answer_call": "answer call",
+  "actions.answer_call": "Answer call",
+  "actions.answer_call_terms": "pick up accept incoming",
   "actions.calls_callback": "calls callback",
   "actions.commands_keyboard_shortcuts": "commands keyboard shortcuts",
   "actions.dial_phone": "dial phone",

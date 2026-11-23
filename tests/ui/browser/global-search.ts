@@ -140,17 +140,19 @@ export default async function globalSearch(
         if (command === "get_history") {
           const query = args.query!.search;
           const result = {
-            entries: /ada|123|49|beispiel/i.test(query)
-              ? [
-                  {
-                    ...entry,
-                    contact:
-                      fixture.permission === "authorized"
-                        ? entry.contact
-                        : null,
-                  },
-                ]
-              : [],
+            entries:
+              args.query!.filter !== "outgoing" &&
+              (!query || /ada|123|49|beispiel/i.test(query))
+                ? [
+                    {
+                      ...entry,
+                      contact:
+                        fixture.permission === "authorized"
+                          ? entry.contact
+                          : null,
+                    },
+                  ]
+                : [],
             total: 0,
             hasMore: false,
             recordingError: null,
@@ -242,6 +244,33 @@ export default async function globalSearch(
     (await target.locator(".history-search input").inputValue()) === "Ada",
     "History result preserves global query",
   );
+  const historyDetails = target.getByRole("group", {
+    name: "Ada Beispiel: Anrufdetails",
+    exact: true,
+  });
+  const historyRow = target.locator(
+    '[data-history-id="history-ada"] .history-main',
+  );
+  await historyRow.click();
+  await historyDetails.waitFor({ state: "hidden" });
+  dialog = await open();
+  await dialog.getByRole("combobox").fill("Ada");
+  await dialog.getByRole("option").filter({ hasText: "Verpasst" }).click();
+  await historyDetails.waitFor();
+
+  await target.getByRole("button", { name: "Ausgehend", exact: true }).click();
+  await target
+    .getByRole("heading", { name: "Keine passenden Anrufe" })
+    .waitFor();
+  dialog = await open();
+  await dialog.getByRole("combobox").fill("Ada");
+  await dialog.getByRole("option").filter({ hasText: "Verpasst" }).click();
+  await historyDetails.waitFor();
+  assert(
+    (await historyRow.getAttribute("aria-expanded")) === "true",
+    "An incoming history result opens from the outgoing filter",
+  );
+
   dialog = await open();
   await dialog.getByRole("combobox").fill("Ada");
   await dialog.getByRole("option").filter({ hasText: "Verpasst" }).waitFor();

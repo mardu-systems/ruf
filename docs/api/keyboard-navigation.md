@@ -24,8 +24,10 @@ search result. Individual contacts, history and settings searches remain availab
   are delayed 200 ms, and stale/unmounted responses are ignored.
 - At most eight contacts and eight history rows appear initially. Extra matches
   expose **Show all …**, opening the existing full panel with its query
-  preserved. History results open the exact record's details and focus its row
-  after the matching page arrives. Deleted results cannot authorize a callback.
+  preserved. Selecting a history result resets the history filter to **All**,
+  opens the exact record's details and focuses its row after the matching page
+  arrives. Selecting the same result again reopens its details. Deleted results
+  cannot authorize a callback.
 - Calling always requires the existing contact call or history callback button.
   Native callback account identity, idle/build/audio checks and token validation
   remain unchanged. Choosing a search result never dials automatically.

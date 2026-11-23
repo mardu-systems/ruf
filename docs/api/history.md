@@ -81,7 +81,9 @@ Storage failures return `storageFailure`.
 
 Deletes completed records transactionally. Ongoing calls are preserved and can
 finish normally into their existing rows. The frontend explains this behavior
-and requests confirmation. Storage failures return `storageFailure`.
+and requests confirmation. The action applies to all completed records and is
+available even when the current filter shows no matches. Storage failures
+return `storageFailure`.
 
 ### `callback_history { id } → EngineSnapshot`
 

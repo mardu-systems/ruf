@@ -67,7 +67,10 @@
   $effect(() => {
     if (focusSearchRequest > appliedSearchFocus && searchInput) {
       appliedSearchFocus = focusSearchRequest;
-      if (searchQuery !== null) query = searchQuery;
+      if (searchQuery !== null) {
+        query = searchQuery;
+        filter = "all";
+      }
       searchInput.focus();
       searchInput.select();
     }
@@ -92,35 +95,7 @@
     retainCount: number;
   } | null = null;
   let requestedSearch = "";
-  let appliedEntryFocus: string | null = null;
-  $effect(() => {
-    const id = focusEntryId;
-    if (!id) {
-      appliedEntryFocus = null;
-      return;
-    }
-    if (
-      id === appliedEntryFocus ||
-      loading ||
-      currentQuery.search !== requestedSearch ||
-      !page?.entries.some((entry) => entry.id === id)
-    )
-      return;
-    untrack(() => {
-      appliedEntryFocus = id;
-      expandedId = id;
-      void tick().then(() => {
-        if (!mounted || focusEntryId !== id) return;
-        const row = [
-          ...document.querySelectorAll<HTMLElement>("[data-history-id]"),
-        ].find((row) => row.dataset.historyId === id);
-        row?.scrollIntoView({ block: "nearest" });
-        row
-          ?.querySelector<HTMLButtonElement>(".history-main")
-          ?.focus({ preventScroll: true });
-      });
-    });
-  });
+  let appliedEntryFocus = 0;
   const groups = $derived(groupHistory(page?.entries ?? []));
   const currentQuery = $derived<HistoryQuery>({
     search: query.trim(),
@@ -129,6 +104,9 @@
     limit: pageSize,
     contactNumbers: contactScope?.numbers ?? [],
   });
+  const isFiltered = $derived(
+    Boolean(currentQuery.search || filter !== "all" || contactScope),
+  );
 
   async function load(
     request: HistoryQuery = currentQuery,
@@ -197,6 +175,32 @@
       void load(request, false, 0);
     }, delay);
     return () => clearTimeout(timer);
+  });
+
+  $effect(() => {
+    const id = focusEntryId;
+    const request = focusSearchRequest;
+    if (
+      !id ||
+      request <= appliedEntryFocus ||
+      loading ||
+      currentQuery.search !== requestedSearch ||
+      !page?.entries.some((entry) => entry.id === id)
+    )
+      return;
+    appliedEntryFocus = request;
+    expandedId = id;
+    void tick().then(() => {
+      if (!mounted || request !== focusSearchRequest || focusEntryId !== id)
+        return;
+      const row = [
+        ...document.querySelectorAll<HTMLElement>("[data-history-id]"),
+      ].find((row) => row.dataset.historyId === id);
+      row?.scrollIntoView({ block: "nearest" });
+      row
+        ?.querySelector<HTMLButtonElement>(".history-main")
+        ?.focus({ preventScroll: true });
+    });
   });
 
   async function remove(id: string | null) {
@@ -311,7 +315,10 @@
       <button
         class="text-button clear-history"
         type="button"
-        disabled={!page?.entries.length || loading || mutating}
+        disabled={loading ||
+          mutating ||
+          !page ||
+          (!isFiltered && page.total === 0)}
         onclick={() => {
           confirmation = "all";
           actionError = null;
@@ -423,7 +430,7 @@
       <div class="empty-state">
         <Icon name="history" size={22} />
         <h2>
-          {query.trim() || filter !== "all" || contactScope
+          {isFiltered
             ? $t("phone.history.no_matches")
             : $t("phone.history.empty")}
         </h2>

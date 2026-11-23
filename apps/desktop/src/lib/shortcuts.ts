@@ -48,7 +48,7 @@ export const phoneActions = [
     id: "answer",
     label: message("actions.answer_call"),
     key: "Enter",
-    terms: message("actions.answer_call"),
+    terms: message("actions.answer_call_terms"),
   },
   {
     id: "end",

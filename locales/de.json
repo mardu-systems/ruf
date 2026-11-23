@@ -1,6 +1,7 @@
 {
   "actions.address_book_people": "adressbuch personen",
-  "actions.answer_call": "antworten gespräch",
+  "actions.answer_call": "Anruf annehmen",
+  "actions.answer_call_terms": "antworten gespräch entgegennehmen",
   "actions.calls_callback": "anrufe rückruf",
   "actions.commands_keyboard_shortcuts": "befehle tastenkürzel shortcuts",
   "actions.dial_phone": "wählen telefon",
