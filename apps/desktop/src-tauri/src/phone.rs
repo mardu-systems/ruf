@@ -533,11 +533,25 @@ impl PhoneSession {
         Ok(())
     }
 
-    pub fn preview_ring(&mut self, device: String) -> Result<EngineSnapshot, PhoneError> {
+    /// Preview selected values on an independent output. Omitted tone settings
+    /// use the saved defaults for this session without changing that baseline.
+    pub fn preview_ring(
+        &mut self,
+        device: String,
+        ringtone: Option<phone_core::Ringtone>,
+        ringtone_volume: Option<u8>,
+    ) -> Result<EngineSnapshot, PhoneError> {
+        let preview = SoundSettings {
+            ring_device: device,
+            ringtone: ringtone.unwrap_or(self.settings.sound.ringtone),
+            ringtone_volume: ringtone_volume.unwrap_or(self.settings.sound.ringtone_volume),
+            ..Default::default()
+        };
+        preview.validate()?;
         if self.engine.is_none() {
             self.engine = Some(self.start_engine(self.settings.audio_mode, &self.settings.sound)?);
         }
-        self.engine()?.preview_ringtone(&device)?;
+        self.engine()?.preview_ringtone_with(&preview)?;
         self.snapshot()
     }
     pub fn stop_preview(&mut self) -> Result<EngineSnapshot, PhoneError> {
@@ -1215,6 +1229,24 @@ mod tests {
 #[cfg(test)]
 mod audio_diagnostic_tests {
     use super::*;
+
+    #[test]
+    fn ringtone_preview_rejects_invalid_drafts_without_starting_the_engine() {
+        let mut session = PhoneSession::default();
+        session.settings.sound.ringtone_volume = 37;
+        for (device, volume) in [("invalid\nendpoint", None), ("", Some(101))] {
+            let error = session
+                .preview_ring(device.into(), Some(phone_core::Ringtone::Short), volume)
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput);
+            assert!(session.engine.is_none());
+            assert_eq!(
+                session.settings.sound.ringtone,
+                phone_core::Ringtone::Classic
+            );
+            assert_eq!(session.settings.sound.ringtone_volume, 37);
+        }
+    }
 
     #[test]
     #[cfg(not(feature = "native"))]

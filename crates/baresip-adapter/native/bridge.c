@@ -316,7 +316,8 @@ static void play_hangup_tone(struct engine *e) {
     mem_deref(tone);
 }
 
-static int start_ring(struct engine *e, const char *device, bool preview) {
+static int start_ring(struct engine *e, const char *device, bool preview,
+                      int variant, unsigned volume) {
     int error = sip_audio_device_available(device, 0);
     if (!error) error = ensure_platform_audio(e);
     if (error) return error;
@@ -326,7 +327,7 @@ static int start_ring(struct engine *e, const char *device, bool preview) {
     struct mbuf *tone = mbuf_alloc(samples * sizeof(int16_t));
     if (!tone) return ENOMEM;
     for (uint32_t i = 0; i < samples; ++i) {
-        int16_t sample = sip_ringtone_sample(e->ringtone_variant, e->ringtone_volume, i);
+        int16_t sample = sip_ringtone_sample(variant, volume, i);
         (void)mbuf_write_mem(tone, (const uint8_t *)&sample, sizeof(sample));
     }
     tone->pos = 0;
@@ -674,7 +675,7 @@ static void event_handler(enum bevent_ev kind, struct bevent *event, void *arg) 
         emit_incoming(e, call, EV_INCOMING, account->id, e->current->generation);
         stop_ring(e);
         if (!e->audio_mode && e->ringtone_enabled) {
-            int error = start_ring(e, e->ring_device, false);
+            int error = start_ring(e, e->ring_device, false, e->ringtone_variant, e->ringtone_volume);
             if (error) emit(e, EV_ERROR, error);
         }
         break;
@@ -938,11 +939,9 @@ static void queue_handler(int id, void *data, void *arg) {
     case OP_PREVIEW: {
         const char *device = r->device ? r->device : "";
         if (e->current->call || e->test_id) error = EBUSY;
-        else if (strlen(device) > 127) error = EINVAL;
-        else {
-            error = sip_audio_device_available(device, 0);
-            if (!error) error = start_ring(e, device, true);
-        }
+        else if (strlen(device) > 127 || r->ringtone_variant < 0 ||
+                 r->ringtone_variant > 2 || r->ringtone_volume > 100) error = EINVAL;
+        else error = start_ring(e, device, true, r->ringtone_variant, r->ringtone_volume);
         emit(e, error ? EV_AUDIO_FAILED : EV_AUDIO_APPLIED, error);
         break;
     }

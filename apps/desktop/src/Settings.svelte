@@ -1121,9 +1121,12 @@
             void soundOperation(() => saveSoundSettings(selected), true);
           }}
           onpreview={() => {
-            const device = sound.ringDevice;
+            const { ringDevice, ringtone, ringtoneVolume } = sound;
             ownsPreview = true;
-            void soundOperation(() => previewRingtone(device), false);
+            void soundOperation(
+              () => previewRingtone(ringDevice, ringtone, ringtoneVolume),
+              false,
+            );
           }}
           onstop={() => {
             ownsPreview = false;

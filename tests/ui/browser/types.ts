@@ -76,6 +76,8 @@ export type FixtureArgs = Partial<{
   confirmHistoryDeletion: boolean;
   kind: AudioTestKind;
   device: string;
+  ringtone: SoundSettings["ringtone"];
+  ringtoneVolume: SoundSettings["ringtoneVolume"];
   sound: SoundSettings;
   muted: boolean;
   held: boolean;

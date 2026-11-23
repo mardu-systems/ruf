@@ -192,7 +192,7 @@
   <div class="setting-row">
     <div class="setting-description">
       <h3>{$t("settings.preview_ringtone")}</h3>
-      <p>
+      <p id="ringtone-preview-help">
         {$t("settings.preview_ringtone_help")}
       </p>
     </div>
@@ -200,6 +200,7 @@
       <button
         class="secondary-button"
         type="button"
+        aria-describedby="ringtone-preview-help"
         disabled={disabled || busy || devicesLoading}
         onclick={playing ? onstop : onpreview}
         >{playing
@@ -212,7 +213,9 @@
   </div>
   <div class="settings-form-actions settings-save-bar">
     <p>
-      {dirty ? $t("settings.unsaved_notice") : ""}
+      {dirty
+        ? $t(playing ? "settings.preview_save_wait" : "settings.unsaved_notice")
+        : ""}
     </p>
     <div class="settings-actions">
       <button
@@ -223,7 +226,7 @@
       ><button
         class="primary-button"
         type="button"
-        disabled={disabled || busy || !dirty}
+        disabled={disabled || busy || !dirty || playing}
         onclick={onsave}
         >{busy ? $t("settings.please_wait") : $t("settings.save_sound")}</button
       >

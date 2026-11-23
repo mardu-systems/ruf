@@ -1,7 +1,8 @@
 use crate::localization::NativeMessage as Message;
 use crate::phone::{PhoneSession, PhoneState};
 use phone_core::{
-    AccountConfig, AppInfo, AudioDevices, EngineSnapshot, ErrorCode, PhoneError, SoundSettings,
+    AccountConfig, AppInfo, AudioDevices, EngineSnapshot, ErrorCode, PhoneError, Ringtone,
+    SoundSettings,
 };
 use tauri::{Emitter, Manager};
 
@@ -433,14 +434,20 @@ pub async fn save_sound_settings(
 ) -> Result<EngineSnapshot, PhoneError> {
     with_session(app, state, move |session| session.save_sound(sound)).await
 }
-/// Play the built-in two-second preview on a draft output without saving it.
+/// Play a two-second native preview without saving it. Omitted tone or volume
+/// uses the saved value. An invalid device ID or volume returns `InvalidInput`.
 #[tauri::command]
 pub async fn preview_ringtone(
     app: tauri::AppHandle,
     state: tauri::State<'_, PhoneState>,
     device: String,
+    ringtone: Option<Ringtone>,
+    ringtone_volume: Option<u8>,
 ) -> Result<EngineSnapshot, PhoneError> {
-    with_session(app, state, move |session| session.preview_ring(device)).await
+    with_session(app, state, move |session| {
+        session.preview_ring(device, ringtone, ringtone_volume)
+    })
+    .await
 }
 /// Stop only a preview, preserving an actual incoming-call alert.
 #[tauri::command]

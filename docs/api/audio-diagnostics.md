@@ -92,8 +92,10 @@ pulses with gentler edges; `short` uses one quarter-second pulse. Zero volume
 produces silence; percentages scale ringtone PCM only, without changing system
 volume, call audio, speaker-test amplitude, or SIP media. `ringtoneEnabled`
 retains its existing incoming-alert meaning. Existing `save_sound_settings`,
-`preview_ringtone` and `stop_ringtone_preview` routes remain compatible; previews
-use the currently applied tone/volume and the separately supplied output device.
+`preview_ringtone` and `stop_ringtone_preview` routes remain compatible. Previews
+can use the draft tone, volume and output device without changing the applied
+settings. Omit `ringtone` or `ringtoneVolume` to audition the corresponding
+applied value. An incoming call continues to use the applied ringtone.
 
 Synthetic native tests use the existing `ausine` source and `aufile` player in
 lab mode, never physical microphone capture. Automated evidence covers exact

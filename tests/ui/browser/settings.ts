@@ -2562,6 +2562,68 @@ export default async function settingsRegressions(
       timeout: 2000,
     });
   });
+  await check(
+    "ringtone preview plays the unsaved sound draft",
+    "",
+    async () => {
+      await page.getByRole("button", { name: "Ton", exact: true }).click();
+      await page.locator("#ringDevice").selectOption("draft-output");
+      await page.locator("#ringtone-style").selectOption("short");
+      await page.locator("#ringtone-volume").fill("32");
+      await page
+        .getByRole("button", { name: "Klingelton anhören", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Hörprobe stoppen", exact: true })
+        .waitFor();
+      const { preview, writes, sound } = await page.evaluate(() => {
+        const { commands, snapshot } = window.__settingsTest;
+        return {
+          preview: commands
+            .filter((item) => item.command === "preview_ringtone")
+            .at(-1)?.args,
+          writes: commands.filter(
+            (item) => item.command === "save_sound_settings",
+          ),
+          sound: snapshot.soundSettings,
+        };
+      });
+      if (
+        !preview ||
+        preview.device !== "draft-output" ||
+        preview.ringtone !== "short" ||
+        preview.ringtoneVolume !== 32 ||
+        writes.length ||
+        sound.ringtone !== "classic" ||
+        sound.ringtoneVolume !== 100 ||
+        sound.ringDevice !== ""
+      )
+        throw Error("Ringtone preview must use the draft without saving it");
+      const save = page.getByRole("button", {
+        name: "Ton speichern",
+        exact: true,
+      });
+      if (!(await save.isDisabled()))
+        throw Error("Sound can be saved during the exclusive preview");
+      await page
+        .getByRole("button", { name: "Hörprobe stoppen", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Klingelton anhören", exact: true })
+        .waitFor();
+      if (!(await save.isEnabled()))
+        throw Error("Ringtone preview incorrectly cleared the draft");
+      await page
+        .getByRole("button", { name: "Verwerfen", exact: true })
+        .click();
+      if (
+        (await page.locator("#ringtone-style").inputValue()) !== "classic" ||
+        (await page.locator("#ringtone-volume").inputValue()) !== "100" ||
+        (await page.locator("#ringDevice").inputValue()) !== ""
+      )
+        throw Error("Discard did not restore the applied ringtone values");
+    },
+  );
   await check("leaving sound stops the owned preview", "", async () => {
     await page.getByRole("button", { name: "Ton", exact: true }).click();
     await page

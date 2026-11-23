@@ -292,12 +292,12 @@ Transport/media error details and trust boundaries are documented in
 
 ## Sound commands (settings window only)
 
-| Command                 | Input                             | Result and errors                                                                                                                                                                                                                                                                                                               |
-| ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_audio_devices`     | none                              | `AudioDevices {inputs: AudioDevice[], outputs: AudioDevice[]}`. Reads current native metadata without starting SIP, reading credentials or opening capture. `engineUnavailable` without native support; `nativeFailure` on enumeration errors.                                                                                  |
-| `save_sound_settings`   | required `{sound: SoundSettings}` | `EngineSnapshot` after durable save and native acknowledgment when an engine exists. Requires idle state; validates live devices even before engine creation. `invalidInput` for invalid/missing/ambiguous devices, `busy` during calls, `storageFailure` on persistence errors, `nativeFailure` for native application errors. |
-| `preview_ringtone`      | required `{device: string}`       | `EngineSnapshot`. Plays a two-second native ringtone on that draft output without saving it. Starts the engine if necessary, locking its audio mode for the session. Requires idle state and valid device. Does not open a microphone or send audio to SIP.                                                                     |
-| `stop_ringtone_preview` | none                              | `EngineSnapshot`. Stops a preview only; never silences an actual incoming-call alert. Safe before engine initialization.                                                                                                                                                                                                        |
+| Command                 | Input                                                                            | Result and errors                                                                                                                                                                                                                                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_audio_devices`     | none                                                                             | `AudioDevices {inputs: AudioDevice[], outputs: AudioDevice[]}`. Reads current native metadata without starting SIP, reading credentials or opening capture. `engineUnavailable` without native support; `nativeFailure` on enumeration errors.                                                                                  |
+| `save_sound_settings`   | required `{sound: SoundSettings}`                                                | `EngineSnapshot` after durable save and native acknowledgment when an engine exists. Requires idle state; validates live devices even before engine creation. `invalidInput` for invalid/missing/ambiguous devices, `busy` during calls, `storageFailure` on persistence errors, `nativeFailure` for native application errors. |
+| `preview_ringtone`      | `{device: string, ringtone?: Ringtone \| null, ringtoneVolume?: number \| null}` | `EngineSnapshot`. Plays a two-second native ringtone using the selected output, tone and volume without saving them. Omitted or null tone or volume uses the corresponding applied value. Starts the engine if necessary, locking its audio mode for the session. Requires idle state and a valid device.                       |
+| `stop_ringtone_preview` | none                                                                             | `EngineSnapshot`. Stops a preview only; never silences an actual incoming-call alert. Safe before engine initialization.                                                                                                                                                                                                        |
 
 `SoundSettings` requires `inputDevice`, `outputDevice`, `ringDevice` (strings)
 and `ringtoneEnabled` (boolean). It also returns `ringtone` (`classic`, `soft`,
@@ -310,6 +310,17 @@ characters, and must match a currently selectable endpoint of the right directio
 Microphone/call-output choices apply to subsequent system-audio calls; test-tone
 mode continues to use its synthetic source/recording path. Default preferences:
 three empty IDs, ringtone enabled, classic tone and volume 100.
+
+For `preview_ringtone`, `device` is required and follows the output ID rules
+above. `Ringtone` accepts `classic`, `soft` or `short`, and `ringtoneVolume`
+accepts integers from 0–100. IPC rejects wrong argument types, unknown enum
+values and integers outside the unsigned 8-bit range. A volume above 100 or
+an invalid device ID returns `invalidInput`. A call, existing preview or audio
+test already observed by the engine returns `busy`. An unavailable output,
+playback failure or native race with a call or test returns `nativeFailure`.
+An unlinked engine returns `engineUnavailable`. Bootstrapping may return the
+usual session data/initialization errors. The preview never opens a microphone
+or sends audio to SIP.
 
 `AudioDevice` contains required `id`, `name`, and `selectable` fields. macOS
 CoreAudio currently routes by device display name; if several physical devices

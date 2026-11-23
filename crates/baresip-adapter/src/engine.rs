@@ -172,17 +172,33 @@ impl Engine {
             Ok(())
         }
     }
-    /// Play the built-in two-second sample on the chosen output; does not save routing.
+    /// Play the applied ringtone and volume for two seconds on the chosen output.
     pub fn preview_ringtone(&mut self, device: &str) -> Result<(), PhoneError> {
-        SoundSettings {
-            ring_device: device.into(),
+        let mut settings = self
+            .snapshot
+            .lock()
+            .map_err(|_| state_error())?
+            .snapshot
+            .sound_settings
+            .clone();
+        settings.ring_device = device.into();
+        self.preview_ringtone_with(&settings)
+    }
+    /// Play a two-second sample of the selected output, tone and volume without
+    /// changing applied settings. Only the ringtone fields are used.
+    /// Returns InvalidInput for invalid ringtone values and Busy during native audio activity.
+    pub fn preview_ringtone_with(&mut self, settings: &SoundSettings) -> Result<(), PhoneError> {
+        let preview = SoundSettings {
+            ring_device: settings.ring_device.clone(),
+            ringtone: settings.ringtone,
+            ringtone_volume: settings.ringtone_volume,
             ..Default::default()
-        }
-        .validate()?;
+        };
+        preview.validate()?;
         self.reserve_sound_operation()?;
         #[cfg(feature = "native")]
         {
-            self.native.audio_test_request(OP_PREVIEW, 0, device)?;
+            self.native.preview_request(&preview)?;
             self.wait_sound_operation()
         }
         #[cfg(not(feature = "native"))]

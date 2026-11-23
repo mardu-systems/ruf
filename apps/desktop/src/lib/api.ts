@@ -76,8 +76,16 @@ export const getAudioDevices = () =>
   desktopInvoke<AudioDevices>("get_audio_devices");
 export const saveSoundSettings = (sound: SoundSettings) =>
   desktopInvoke<EngineSnapshot>("save_sound_settings", { sound });
-export const previewRingtone = (device: string) =>
-  desktopInvoke<EngineSnapshot>("preview_ringtone", { device });
+export const previewRingtone = (
+  device: string,
+  ringtone?: SoundSettings["ringtone"],
+  ringtoneVolume?: SoundSettings["ringtoneVolume"],
+) =>
+  desktopInvoke<EngineSnapshot>("preview_ringtone", {
+    device,
+    ringtone,
+    ringtoneVolume,
+  });
 export const stopRingtonePreview = () =>
   desktopInvoke<EngineSnapshot>("stop_ringtone_preview");
 export const dial = (destination: string) =>

@@ -4,7 +4,7 @@ use crate::engine::EngineState;
 use phone_core::{
     AccountConfig, AudioDevice, AudioDevices, AudioMode, AudioTestKind, AudioTestSnapshot,
     CallDirection, CallEvent, CallEventKind, CallState, CallerIdentity, ErrorCode, PhoneError,
-    RegistrationState, SoundSettings,
+    RegistrationState, Ringtone, SoundSettings,
 };
 use std::{
     ffi::{CStr, CString, c_void},
@@ -27,6 +27,14 @@ const SECURITY_CERTIFICATE: i32 = 20001;
 const SECURITY_TRANSPORT: i32 = 20002;
 const SECURITY_MEDIA: i32 = 20003;
 const CALL_EVENT_CAPACITY: usize = 64;
+
+fn ringtone_variant(ringtone: Ringtone) -> i32 {
+    match ringtone {
+        Ringtone::Classic => 0,
+        Ringtone::Soft => 1,
+        Ringtone::Short => 2,
+    }
+}
 
 /// Private ABI mirrored by bridge.c; every pointer is borrowed for the callback only.
 #[repr(C)]
@@ -1096,11 +1104,18 @@ impl NativeEngine {
             output_device: output.as_ptr(),
             ring_device: ring.as_ptr(),
             enabled: i32::from(settings.ringtone_enabled),
-            ringtone_variant: match settings.ringtone {
-                phone_core::Ringtone::Classic => 0,
-                phone_core::Ringtone::Soft => 1,
-                phone_core::Ringtone::Short => 2,
-            },
+            ringtone_variant: ringtone_variant(settings.ringtone),
+            ringtone_volume: u32::from(settings.ringtone_volume),
+            ..Default::default()
+        })
+    }
+
+    pub(crate) fn preview_request(&self, settings: &SoundSettings) -> Result<(), PhoneError> {
+        let device = cstring(&settings.ring_device)?;
+        self.submit(NativeRequest {
+            operation: OP_PREVIEW,
+            device: device.as_ptr(),
+            ringtone_variant: ringtone_variant(settings.ringtone),
             ringtone_volume: u32::from(settings.ringtone_volume),
             ..Default::default()
         })
