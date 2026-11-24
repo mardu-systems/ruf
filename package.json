@@ -47,7 +47,7 @@
     "test:ui:flows": "bun scripts/check-ui-flows.ts"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "playwright-core": "1.66.0-alpha-1794252756000"
   }
 }
